@@ -1,0 +1,80 @@
+// This app shares byg-global's Postgres database, but does NOT own
+// migrations for these tables. `hosting_services` / `hosting_invoices`
+// (plus their FKs into byg-global's User/business_profiles tables) are
+// created and migrated from byg-global/prisma/migrations -- this schema
+// only describes them so this app's Prisma Client can read/write them.
+// Never run `prisma migrate dev|deploy` from this project.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum HostingServiceStatus {
+  active
+  payment_due
+  overdue
+  grace_period
+  suspended
+  cancelled
+}
+
+enum HostingInvoiceStatus {
+  pending
+  paid
+  overdue
+  void
+}
+
+model HostingService {
+  id                String               @id @default(cuid())
+  businessProfileId String?
+  userId            String?
+  customerName      String
+  customerEmail     String
+  customerPhone     String?
+  domain            String
+  planName          String
+  monthlyPriceKes   Float
+  billingDayOfMonth Int                  @default(1)
+  graceDays         Int                  @default(5)
+  invoiceLeadDays   Int                  @default(5)
+  status            HostingServiceStatus @default(active)
+  notes             String?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+  invoices          HostingInvoice[]
+
+  @@index([status])
+  @@index([businessProfileId])
+  @@index([userId])
+  @@map("hosting_services")
+}
+
+model HostingInvoice {
+  id                 String               @id @default(cuid())
+  hostingServiceId   String
+  periodStartsAt     DateTime
+  periodEndsAt       DateTime
+  amountKes          Float
+  dueDate            DateTime
+  status             HostingInvoiceStatus @default(pending)
+  payToken           String               @unique @default(cuid())
+  checkoutRequestId  String?
+  mpesaReceiptNumber String?
+  paidAt             DateTime?
+  remindersSentAt    Json?
+  metadata           Json?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  hostingService     HostingService       @relation(fields: [hostingServiceId], references: [id], onDelete: Cascade)
+
+  @@unique([hostingServiceId, periodStartsAt])
+  @@index([status, dueDate])
+  @@index([checkoutRequestId])
+  @@map("hosting_invoices")
+}
