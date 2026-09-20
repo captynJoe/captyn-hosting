@@ -24,7 +24,7 @@ This is a separate Next.js app, but it is **not** fully isolated:
   byg-global uses (own env vars, same shared secret) — no runtime call into
   byg-global for this.
 - **Auth**: single-operator password gate (`HOSTING_ADMIN_PASSWORD`), no user
-  table, no shared session with byg-global. See `src/middleware.ts`.
+  table, no shared session with byg-global. See `src/proxy.ts`.
 - **Ops alerting**: overdue invoices are only logged (`console.warn`) right
   now — they are *not* pushed into byg-global's Ops Inbox, since that would
   require a second, reverse cross-project dependency this app doesn't have
@@ -47,7 +47,40 @@ sends due/overdue reminder emails, and marks invoices overdue. Schedule it
 to run daily from n8n or any external cron — same pattern byg-global uses
 for its own automation routes.
 
-## Deployment
+## Deployment (VPS6)
 
-Not yet wired into CAPTYN's VPS/nginx topology — this only covers the
-application code. Runs on port 3100 by default (`npm run dev` / `npm start`).
+Lives at `https://hosting.captyn.shop`, deployed on VPS6 (`joe@62.171.175.255`)
+— the same box that already runs byg-global's edge stack, plus small
+client sites like `devoile_essentials_site` and `ideal-farm`.
+
+- **Location**: `/home/joe/captyn-hosting` (`git clone` of this repo).
+- **Network**: unlike the fully-isolated client sites (which reach nginx via
+  `host.docker.internal:<port>`), this container joins the edge stack's
+  existing `captyn_vps6_edge_captyn_network` (see `docker-compose.yml`) —
+  needed so it can resolve `dataproxy` (byg-global's Postgres access point)
+  the same way byg-global's own `frontend` service does. This also means
+  nginx can reach it directly by container name (`captyn-hosting:3100`),
+  no host port publish needed.
+- **`.env`**: copy `.env.example` to `.env` on the server and fill in real
+  values — `DATABASE_URL` and the `N8N_*` values should match byg-global's
+  own `.env.common` on VPS6 (`/home/joe/captyn_ecommerce/byg-global/.env.common`,
+  `DATABASE_URL` there points at `dataproxy:5432`). Generate fresh values
+  for `HOSTING_SESSION_SECRET`, `HOSTING_ADMIN_PASSWORD`, and
+  `HOSTING_AUTOMATION_KEY` — don't reuse byg-global's.
+  `HOSTING_APP_BASE_URL=https://hosting.captyn.shop`,
+  `NEXT_PUBLIC_BYG_GLOBAL_BASE_URL=https://captyn.shop`.
+- **byg-global side**: its `HOSTING_APP_ALLOWED_ORIGINS` env var must include
+  `https://hosting.captyn.shop` for the pay page's cross-origin STK-init
+  call to be allowed, then the frontend container needs a restart to pick
+  it up.
+- **nginx**: add an upstream + HTTPS server block for `hosting.captyn.shop`
+  in `byg-global/nginx/templates/captyn.vps1.conf.template` (modeled on the
+  idealfarm/devoile blocks, but `proxy_pass http://captyn-hosting:3100`
+  instead of `host.docker.internal`, since this container shares the
+  network). Requires a Let's Encrypt cert for the hostname first (DNS must
+  resolve before certbot's HTTP-01 challenge will pass), then
+  `docker exec captyn_vps6_edge-nginx-1 nginx -s reload`.
+- **DNS**: Cloudflare-managed, proxied (orange-clouded), A record →
+  VPS6's public IP — same pattern as `idealfarm.captyn.shop`.
+
+Build/run: `docker compose up -d --build` from `/home/joe/captyn-hosting`.

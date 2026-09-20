@@ -1,0 +1,26 @@
+# Deployed on VPS6, joining the edge stack's existing docker network so
+# this container can resolve `dataproxy` (byg-global's Postgres access
+# point) the same way byg-global's own `frontend` service does, and so
+# the edge nginx can reach this container by name (`captyn-hosting:3100`)
+# without needing a host-published port or the host.docker.internal
+# workaround the fully-isolated client sites (devoile/idealfarm) use.
+services:
+  captyn-hosting:
+    build: .
+    container_name: captyn-hosting
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: "3100"
+    cpus: ${CAPTYN_HOSTING_CPUS:-0.30}
+    mem_limit: ${CAPTYN_HOSTING_MEM_LIMIT:-256m}
+    memswap_limit: ${CAPTYN_HOSTING_MEMSWAP_LIMIT:-384m}
+    mem_reservation: ${CAPTYN_HOSTING_MEM_RESERVATION:-96m}
+    networks:
+      - default
+
+networks:
+  default:
+    name: captyn_vps6_edge_captyn_network
+    external: true
