@@ -6,26 +6,41 @@ interface SendEmailInput {
 }
 
 /**
- * byg-global's stored N8N_EMAIL_WEBHOOK_URL is double-percent-encoded
- * (e.g. "checkout%2520email%2520webhook" instead of "checkout%20email
- * %20webhook") -- sent as-is, the HTTP layer only decodes one level,
- * so n8n sees a literal "%20" in the path and 404s ("webhook is not
- * registered"). byg-global's own sender works around this by also
- * trying a decodeURIComponent'd candidate; replicate that here.
+ * byg-global's stored N8N_EMAIL_WEBHOOK_URL / N8N_WEBHOOK_SEND_EMAIL are
+ * both a dead, double-percent-encoded webhook path ("...checkout%2520
+ * email%2520webhook/send-email" -- an old workflow's custom webhook ID
+ * that's no longer registered in n8n, confirmed 404 regardless of
+ * encoding). The webhook that's actually active is the plain
+ * "/webhook/send-email" path off N8N_BASE_URL -- confirmed 200 OK
+ * directly against n8n. byg-global's own sender already falls through
+ * to this same base-URL candidate last in its list, which is why its
+ * real emails still go out; this app's list must include it too.
  */
 function resolveWebhookUrlCandidates(): string[] {
   const candidates: string[] = [];
-  const configured =
-    process.env.N8N_EMAIL_WEBHOOK_URL?.trim() ||
-    `${(process.env.N8N_BASE_URL?.trim().replace(/\/+$/, "")) || "http://n8n:5678"}/webhook/send-email`;
+  const seen = new Set<string>();
+  const add = (url: string | null | undefined) => {
+    const trimmed = url?.trim();
+    if (trimmed && !seen.has(trimmed)) {
+      seen.add(trimmed);
+      candidates.push(trimmed);
+    }
+  };
 
-  candidates.push(configured);
-  try {
-    const decoded = decodeURIComponent(configured);
-    if (decoded !== configured) candidates.push(decoded);
-  } catch {
-    // Not URI-encoded beyond what's already valid; ignore.
+  const configured = process.env.N8N_EMAIL_WEBHOOK_URL?.trim();
+  add(configured);
+  if (configured) {
+    try {
+      add(decodeURIComponent(configured));
+    } catch {
+      // Not URI-encoded beyond what's already valid; ignore.
+    }
   }
+  add(process.env.N8N_WEBHOOK_SEND_EMAIL);
+
+  const base = process.env.N8N_BASE_URL?.trim().replace(/\/+$/, "") || "http://n8n:5678";
+  add(`${base}/webhook/send-email`);
+
   return candidates;
 }
 
