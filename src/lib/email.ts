@@ -5,11 +5,28 @@ interface SendEmailInput {
   html: string;
 }
 
-function resolveWebhookUrl(): string {
-  const configured = process.env.N8N_EMAIL_WEBHOOK_URL?.trim();
-  if (configured) return configured;
-  const base = process.env.N8N_BASE_URL?.trim().replace(/\/+$/, "") || "http://n8n:5678";
-  return `${base}/webhook/send-email`;
+/**
+ * byg-global's stored N8N_EMAIL_WEBHOOK_URL is double-percent-encoded
+ * (e.g. "checkout%2520email%2520webhook" instead of "checkout%20email
+ * %20webhook") -- sent as-is, the HTTP layer only decodes one level,
+ * so n8n sees a literal "%20" in the path and 404s ("webhook is not
+ * registered"). byg-global's own sender works around this by also
+ * trying a decodeURIComponent'd candidate; replicate that here.
+ */
+function resolveWebhookUrlCandidates(): string[] {
+  const candidates: string[] = [];
+  const configured =
+    process.env.N8N_EMAIL_WEBHOOK_URL?.trim() ||
+    `${(process.env.N8N_BASE_URL?.trim().replace(/\/+$/, "")) || "http://n8n:5678"}/webhook/send-email`;
+
+  candidates.push(configured);
+  try {
+    const decoded = decodeURIComponent(configured);
+    if (decoded !== configured) candidates.push(decoded);
+  } catch {
+    // Not URI-encoded beyond what's already valid; ignore.
+  }
+  return candidates;
 }
 
 /**
@@ -18,7 +35,7 @@ function resolveWebhookUrl(): string {
  * byg-global's N8N_WEBHOOK_SECRET for the HMAC signature to be accepted.
  */
 export async function sendEmail(input: SendEmailInput): Promise<boolean> {
-  const webhookUrl = resolveWebhookUrl();
+  const webhookUrls = resolveWebhookUrlCandidates();
   const secret = process.env.HOSTING_EMAIL_WEBHOOK_SECRET?.trim();
   const timestamp = Date.now().toString();
 
@@ -61,17 +78,19 @@ export async function sendEmail(input: SendEmailInput): Promise<boolean> {
     headers["Authorization"] = `Basic ${btoa(`${n8nUser}:${n8nPassword}`)}`;
   }
 
-  for (let attempt = 1; attempt <= 2; attempt += 1) {
-    try {
-      const response = await fetch(webhookUrl, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload),
-      });
-      if (response.ok) return true;
-      console.error("Hosting email webhook returned non-OK status:", response.status, await response.text());
-    } catch (error) {
-      console.error(`Hosting email send attempt ${attempt} failed:`, error);
+  for (const webhookUrl of webhookUrls) {
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const response = await fetch(webhookUrl, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(payload),
+        });
+        if (response.ok) return true;
+        console.error("Hosting email webhook returned non-OK status:", webhookUrl, response.status, await response.text());
+      } catch (error) {
+        console.error(`Hosting email send attempt ${attempt} failed:`, webhookUrl, error);
+      }
     }
   }
   return false;
