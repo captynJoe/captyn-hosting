@@ -23,8 +23,12 @@ This is a separate Next.js app, but it is **not** fully isolated:
 - **Email**: sent independently via the same shared n8n "send-email" webhook
   byg-global uses (own env vars, same shared secret) — no runtime call into
   byg-global for this.
-- **Auth**: single-operator password gate (`HOSTING_ADMIN_PASSWORD`), no user
-  table, no shared session with byg-global. See `src/proxy.ts`.
+- **Auth**: email/password login checked against byg-global's real `User`
+  table (same DB, same bcrypt `passwordHash`, requires `isAdmin` + `active`
+  status) — operators use their existing ecommerce admin credentials, no
+  separate password for this app. This app's own session cookie is
+  independent of byg-global's (no shared NextAuth session, no SSO). See
+  `src/lib/adminAuth.ts` and `src/proxy.ts`.
 - **Ops alerting**: overdue invoices are only logged (`console.warn`) right
   now — they are *not* pushed into byg-global's Ops Inbox, since that would
   require a second, reverse cross-project dependency this app doesn't have
@@ -63,12 +67,12 @@ client sites like `devoile_essentials_site` and `ideal-farm`.
   no host port publish needed.
 - **`.env`**: copy `.env.example` to `.env` on the server and fill in real
   values — `DATABASE_URL` and the `N8N_*` values should match byg-global's
-  own `.env.common` on VPS6 (`/home/joe/captyn_ecommerce/byg-global/.env.common`,
-  `DATABASE_URL` there points at `dataproxy:5432`). Generate fresh values
-  for `HOSTING_SESSION_SECRET`, `HOSTING_ADMIN_PASSWORD`, and
+  own runtime env on VPS6 (`DATABASE_URL` there points at `dataproxy:5432`).
+  Generate fresh values for `HOSTING_SESSION_SECRET` and
   `HOSTING_AUTOMATION_KEY` — don't reuse byg-global's.
   `HOSTING_APP_BASE_URL=https://hosting.captyn.shop`,
-  `NEXT_PUBLIC_BYG_GLOBAL_BASE_URL=https://captyn.shop`.
+  `NEXT_PUBLIC_BYG_GLOBAL_BASE_URL=https://captyn.shop`. No admin password
+  to set — login uses the same `User` table as byg-global's admin login.
 - **byg-global side**: its `HOSTING_APP_ALLOWED_ORIGINS` env var must include
   `https://hosting.captyn.shop` for the pay page's cross-origin STK-init
   call to be allowed, then the frontend container needs a restart to pick
