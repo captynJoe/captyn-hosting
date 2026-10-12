@@ -12,6 +12,7 @@ const PUBLIC_PATHS = [
   /^\/api\/auth\/login$/,
   /^\/api\/site-status$/,
   /^\/site\//,
+  /^\/captyn-mark\.png$/,
 ];
 
 function isPublicPath(pathname: string): boolean {
@@ -21,7 +22,7 @@ function isPublicPath(pathname: string): boolean {
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
-  if (isPublicPath(pathname) || pathname.startsWith("/_next") || pathname === "/favicon.ico") {
+  if (isPublicPath(pathname) || pathname.startsWith("/_next") || pathname === "/favicon.ico" || pathname === "/captynlogo.png") {
     return NextResponse.next();
   }
 

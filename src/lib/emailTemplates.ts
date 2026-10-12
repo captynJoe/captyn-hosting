@@ -10,6 +10,11 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+function brandMarkUrl(): string {
+  const base = (process.env.HOSTING_APP_BASE_URL || "https://hosting.captyn.shop").replace(/\/+$/, "");
+  return `${base}/captyn-mark.png`;
+}
+
 type EmailParts = { subject: string; html: string; text: string };
 
 type ShellInput = {
@@ -43,8 +48,11 @@ function emailShell(input: ShellInput): string {
 <body style="margin:0;padding:24px 12px;background:#f1f5f9;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#0f172a;line-height:1.55;">
   <div style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:14px;overflow:hidden;border:1px solid #e2e8f0;">
     <div style="padding:20px 24px;border-bottom:1px solid #e2e8f0;">
-      <div style="font-size:13px;color:#64748b;">CAPTYN Hosting</div>
-      <div style="font-size:18px;font-weight:600;">${escapeHtml(input.domain)}</div>
+      <table role="presentation" style="border-collapse:collapse;"><tr>
+        <td style="padding:0 10px 0 0;vertical-align:middle;"><img src="${brandMarkUrl()}" width="34" height="34" alt="CAPTYN" style="display:block;border-radius:9px;"></td>
+        <td style="vertical-align:middle;font-size:13px;font-weight:800;letter-spacing:2px;color:#0f172a;">CAPTYN HOSTING</td>
+      </tr></table>
+      <div style="font-size:18px;font-weight:600;margin-top:14px;">${escapeHtml(input.domain)}</div>
     </div>
     <div style="padding:24px;">
       <div style="font-size:32px;font-weight:700;color:${color};">${escapeHtml(input.amountLabel)}</div>

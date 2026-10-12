@@ -9,6 +9,9 @@ function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+// Same mark as byg-global's CaptynBrandMark (src/components/CaptynBrandLink.tsx).
+const CAPTYN_MARK = `<span class="mark" aria-hidden="true"><svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg"><path d="M90 18H57C34.4 18 16 36.4 16 59c0 4.8.8 9.3 2.2 13.6l15.7-8.6c-.3-1.6-.4-3.3-.4-5 0-13 10.5-23.5 23.5-23.5h24.2L90 18Z" fill="#FBFBFB"/><path d="M15 73.1c16.6-11.2 35.1-17.6 56.7-19.4 8.2-.7 15.9-.6 23.3.2l-10 5.6c-20.1 0-38.9 5.5-57.2 17.4L15 73.1Z" fill="#FBFBFB"/><path d="M32.7 84.5C39.8 91.2 49 95 59 95h20.8L89.5 78H59c-5.9 0-11.2-1.8-16-5.5l-10.3 12Z" fill="#FBFBFB"/><path d="M71 46l33 12-39 19 12.8-16.7L71 46Z" fill="#E8B12C"/></svg></span>`;
+
 const STYLES = `
 :root { --bg:#f1f5f9; --card:#ffffff; --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --warn:#b45309; --stop:#b91c1c; --good:#047857; --btn:#0f172a; --btn-ink:#ffffff; }
 @media (prefers-color-scheme: dark) {
@@ -17,8 +20,10 @@ const STYLES = `
 * { box-sizing:border-box; }
 body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px 16px; background:var(--bg); color:var(--ink); font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif; line-height:1.5; }
 .card { width:100%; max-width:420px; background:var(--card); border:1px solid var(--line); border-radius:18px; padding:28px 24px; }
-.brand { font-size:13px; color:var(--muted); }
-.domain { font-size:20px; font-weight:650; margin:2px 0 22px; word-break:break-all; }
+.brand { display:flex; align-items:center; gap:10px; font-size:13px; font-weight:800; letter-spacing:.16em; text-transform:uppercase; }
+.mark { display:inline-flex; width:34px; height:34px; align-items:center; justify-content:center; border-radius:10px; background:#050505; box-shadow:0 0 0 1px rgba(255,255,255,.1); }
+.mark svg { width:26px; height:26px; }
+.domain { font-size:20px; font-weight:650; margin:18px 0 22px; word-break:break-all; }
 .amount { font-size:40px; font-weight:750; letter-spacing:-0.02em; }
 .caption { font-size:14px; margin-top:2px; }
 .warn { color:var(--warn); } .stop { color:var(--stop); } .good { color:var(--good); } .muted { color:var(--muted); }
@@ -61,7 +66,7 @@ function caption(state: PayState): { text: string; tone: string } {
 export function renderPayPage(state: PayState, apiPath: string, siteUrl?: string): string {
   const { text, tone } = caption(state);
   const body = `<main class="card">
-  <div class="brand">CAPTYN Hosting</div>
+  <div class="brand">${CAPTYN_MARK}CAPTYN Hosting</div>
   <div class="domain">${escapeHtml(state.domain)}</div>
   <div class="amount" id="amount">${formatKes(state.balanceKes)}</div>
   <div class="caption ${tone}" id="caption">${escapeHtml(text)}</div>
@@ -125,7 +130,7 @@ export function renderPausedPage(domain: string, payPath: string): string {
   return shell(
     `${domain} is temporarily unavailable`,
     `<main class="card">
-  <div class="domain" style="margin-bottom:8px">${escapeHtml(domain)}</div>
+  <div class="domain" style="margin:0 0 8px">${escapeHtml(domain)}</div>
   <p style="margin:0 0 4px;font-size:18px;font-weight:600">This site is temporarily unavailable.</p>
   <p class="muted" style="margin:0">Please check back soon.</p>
   <p class="foot"><a href="${escapeHtml(payPath)}">Site owner? Pay your hosting bill</a></p>
