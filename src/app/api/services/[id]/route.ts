@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { DAY_MS, isValidDomain, isValidEmail, normalizeDomain, parseEmails } from "@/lib/ledger";
 import { generateDueInvoices, loadServiceLedger, startOfUtcDay, syncService } from "@/lib/hostingBilling";
 import { readAmount, serviceDetail } from "@/lib/serviceView";
+import { forgetSiteStatus } from "@/lib/siteStatusCache";
 
 export async function GET(
   _request: NextRequest,
@@ -24,9 +25,10 @@ export async function GET(
 }
 
 /**
- * Edits details and prices (future bills only), plus three actions:
- * `extendDays` pushes the pause date (and lifts a pause), `cancel` stops
- * billing, `reactivate` resumes it.
+ * Edits details and prices (future bills only), plus actions: `extendDays`
+ * pushes the pause date (and lifts a payment pause), `pause` true/false
+ * pauses or resumes the site by hand, `cancel` stops billing, `reactivate`
+ * resumes it.
  */
 export async function PATCH(
   request: NextRequest,
@@ -101,7 +103,14 @@ export async function PATCH(
       data.suspendAfter = new Date(from + extendDays * DAY_MS);
       if (service.status === HostingServiceStatus.suspended) data.status = HostingServiceStatus.overdue;
     }
-    if (body?.cancel === true) data.status = HostingServiceStatus.cancelled;
+    if (typeof body?.pause === "boolean") {
+      data.manualPause = body.pause;
+      if (!body.pause && service.status === HostingServiceStatus.suspended) data.status = HostingServiceStatus.overdue;
+    }
+    if (body?.cancel === true) {
+      data.status = HostingServiceStatus.cancelled;
+      data.manualPause = false;
+    }
     if (body?.reactivate === true && service.status === HostingServiceStatus.cancelled) {
       data.status = HostingServiceStatus.active;
       data.suspendAfter = null;
@@ -117,6 +126,8 @@ export async function PATCH(
       await generateDueInvoices(updated);
     }
     await syncService(id);
+    forgetSiteStatus(service.domain);
+    if (typeof data.domain === "string") forgetSiteStatus(data.domain);
     const loaded = await loadServiceLedger(id);
     return NextResponse.json({ success: true, service: loaded ? serviceDetail(loaded.service, loaded.ledger) : null });
   } catch (error) {

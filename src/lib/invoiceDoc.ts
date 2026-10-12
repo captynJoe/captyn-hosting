@@ -50,7 +50,7 @@ function invoiceNumber(serviceId: string, issuedAt: Date): string {
 }
 
 export function invoiceKindFor(service: Pick<HostingService, "status" | "suspendAfter">, ledger: Ledger): InvoiceKind {
-  if (service.status === "suspended") return "paused";
+  if (service.status === "suspended" && ledger.overdueKes > 0) return "paused";
   if (ledger.overdueKes > 0 && service.suspendAfter) return "overdue";
   return "bill";
 }

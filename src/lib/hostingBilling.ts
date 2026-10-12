@@ -166,7 +166,7 @@ export async function syncService(
   }
 
   const next = nextServiceState(service, ledger, now);
-  if (next.status === HostingServiceStatus.suspended && service.status !== HostingServiceStatus.suspended && !canPause) {
+  if (next.status === HostingServiceStatus.suspended && service.status !== HostingServiceStatus.suspended && !canPause && !service.manualPause) {
     next.status = HostingServiceStatus.overdue;
   }
   const previousStatus = service.status;
@@ -187,7 +187,7 @@ export async function syncService(
   return { service: updated, ledger, previousStatus };
 }
 
-/** For the site gate: paused only while money is actually overdue. */
+/** For the site gate: paused by an admin, or while money is actually overdue. */
 export async function isSitePaused(domain: string, now: Date = new Date()): Promise<boolean> {
   const service = await prisma.hostingService.findFirst({
     where: { domain: { equals: domain, mode: "insensitive" }, status: HostingServiceStatus.suspended },
@@ -195,7 +195,7 @@ export async function isSitePaused(domain: string, now: Date = new Date()): Prom
   });
   if (!service) return false;
   const loaded = await loadServiceLedger(service.id, now);
-  if (!loaded || loaded.ledger.overdueKes > 0) return true;
+  if (!loaded || loaded.service.manualPause || loaded.ledger.overdueKes > 0) return true;
   // Paid since the pause: lift it now rather than at the next daily run.
   await syncService(service.id, now);
   return false;

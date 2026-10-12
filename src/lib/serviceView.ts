@@ -30,6 +30,7 @@ export function summarizeService(service: HostingService, ledger: Ledger) {
     billingDayOfMonth: service.billingDayOfMonth,
     graceDays: service.graceDays,
     status: service.status,
+    manualPause: service.manualPause,
     suspendAfter: service.suspendAfter,
     reminderSentAt: service.reminderSentAt,
     notes: service.notes,
@@ -39,6 +40,10 @@ export function summarizeService(service: HostingService, ledger: Ledger) {
     paidKes: ledger.paidKes,
     nextDueDate: ledger.firstOpen?.dueDate ?? null,
     payUrl: ledger.firstOpen ? payUrlFor(ledger.firstOpen.payToken) : null,
+    invoiceUrl: (() => {
+      const token = ledger.firstOpen?.payToken ?? ledger.invoices[ledger.invoices.length - 1]?.payToken;
+      return token ? payUrlFor(token).replace("/p/", "/i/") : null;
+    })(),
   };
 }
 
@@ -50,6 +55,8 @@ export function serviceDetail(service: HostingService & { payments: HostingPayme
       ...[...ledger.upcoming].reverse().map((row) => ({
         id: row.id,
         label: labels.get(row.id) || "Hosting",
+        isCharge: Boolean(row.description),
+        description: row.description,
         dueDate: row.dueDate,
         amountKes: row.amountKes,
         paidKes: 0,
@@ -59,6 +66,8 @@ export function serviceDetail(service: HostingService & { payments: HostingPayme
       ...[...ledger.invoices].reverse().map((row) => ({
       id: row.id,
       label: labels.get(row.id) || "Hosting",
+      isCharge: Boolean(row.description),
+      description: row.description,
       dueDate: row.dueDate,
       amountKes: row.amountKes,
       paidKes: row.paidKes,

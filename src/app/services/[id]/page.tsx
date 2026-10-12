@@ -8,6 +8,8 @@ import { buildProgress, formatDate, formatKes, standing, TONE_TEXT, type SiteSum
 type Bill = {
   id: string;
   label: string;
+  isCharge: boolean;
+  description: string | null;
   dueDate: string;
   amountKes: number;
   paidKes: number;
@@ -58,6 +60,7 @@ export default function SitePage() {
   const [charge, setCharge] = useState({ description: "", amountKes: "", dueDate: "" });
   const [payment, setPayment] = useState({ amountKes: "", paidAt: "", receipt: "", note: "", emailReceipt: true });
   const [settings, setSettings] = useState<Record<string, string>>({});
+  const [editing, setEditing] = useState<{ id: string; amountKes: string; dueDate: string; description: string } | null>(null);
 
   const applySite = useCallback((next: SiteDetail) => {
     setSite(next);
@@ -71,6 +74,7 @@ export default function SitePage() {
       setupFeeKes: String(next.setupFeeKes || ""),
       setupInstallmentKes: String(next.setupInstallmentKes || ""),
       graceDays: String(next.graceDays),
+      notes: next.notes || "",
     });
   }, []);
 
@@ -138,6 +142,35 @@ export default function SitePage() {
     }
   }
 
+  async function saveBill() {
+    if (!editing) return;
+    const ok = await call(
+      `/api/services/${id}/invoices/${editing.id}`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          amountKes: Number(editing.amountKes),
+          dueDate: editing.dueDate,
+          ...(editing.description ? { description: editing.description } : {}),
+        }),
+      },
+      "Bill updated."
+    );
+    if (ok) setEditing(null);
+  }
+
+  function removeBill(bill: Bill) {
+    if (window.confirm(`Remove "${bill.label}" (${formatKes(bill.amountKes)})? It stops counting toward the balance.`)) {
+      void call(`/api/services/${id}/invoices/${bill.id}`, { method: "DELETE" }, "Bill removed.");
+    }
+  }
+
+  function removePayment(p: Payment) {
+    if (window.confirm(`Remove the ${formatKes(p.amountKes)} payment from ${formatDate(p.paidAt)}? The balance goes back up.`)) {
+      void call(`/api/services/${id}/payments/${p.id}`, { method: "DELETE" }, "Payment removed.");
+    }
+  }
+
   function openPayment() {
     setCharging(false);
     setPaying((v) => !v);
@@ -201,6 +234,10 @@ export default function SitePage() {
       <section className="mt-6 rounded-2xl border border-[var(--line)] bg-[var(--card)] p-5">
         <p className="text-4xl font-bold tracking-tight">{formatKes(site.balanceKes)}</p>
         <p className={`mt-1 text-sm font-medium ${TONE_TEXT[state.tone]}`}>{state.text}</p>
+        <p className="mt-1 text-xs text-[var(--muted)]">
+          {site.status === "suspended" ? "Site paused" : site.status === "cancelled" ? "Not billed" : "Site online"}
+          {site.reminderSentAt ? ` · last emailed ${formatDate(site.reminderSentAt)}` : " · not emailed yet"}
+        </p>
 
         {build && (
           <div className="mt-4 max-w-sm">
@@ -224,12 +261,17 @@ export default function SitePage() {
           </button>
           {site.balanceKes > 0 && site.status !== "cancelled" && (
             <button
-              onClick={() => call(`/api/services/${id}/invoices`, { method: "POST" }, `Sent to ${site.customerEmail}.`)}
+              onClick={() => call(`/api/services/${id}/invoices`, { method: "POST" }, `Invoice sent to ${site.customerEmail}.`)}
               disabled={busy}
               className={secondaryButton}
             >
-              Send reminder
+              Email invoice
             </button>
+          )}
+          {site.invoiceUrl && (
+            <a href={site.invoiceUrl} target="_blank" rel="noreferrer" className={secondaryButton}>
+              View invoice
+            </a>
           )}
           {canExtend && (
             <button
@@ -374,15 +416,75 @@ export default function SitePage() {
             <ul className="divide-y divide-[var(--line)]">
               {statement.map((row) =>
                 row.kind === "bill" ? (
-                  <li key={`b-${row.bill.id}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 py-3 text-sm">
-                    <div className="min-w-0">
-                      <p>{row.bill.label}</p>
-                      <p className="text-xs text-[var(--muted)]">Due {formatDate(row.bill.dueDate)}</p>
+                  <li key={`b-${row.bill.id}`} className="px-5 py-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                      <div className="min-w-0">
+                        <p>{row.bill.label}</p>
+                        <p className="text-xs text-[var(--muted)]">
+                          Due {formatDate(row.bill.dueDate)}
+                          {row.bill.openKes > 0 && editing?.id !== row.bill.id && (
+                            <>
+                              {" · "}
+                              <button
+                                onClick={() =>
+                                  setEditing({
+                                    id: row.bill.id,
+                                    amountKes: String(row.bill.amountKes),
+                                    dueDate: row.bill.dueDate.slice(0, 10),
+                                    description: row.bill.description || "",
+                                  })
+                                }
+                                className="underline hover:text-[var(--ink)]"
+                              >
+                                Edit
+                              </button>
+                              {" · "}
+                              <button onClick={() => removeBill(row.bill)} className="underline hover:text-[var(--stop)]">
+                                Remove
+                              </button>
+                            </>
+                          )}
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p>{formatKes(row.bill.amountKes)}</p>
+                        <p className={`text-xs ${billState(row.bill).className}`}>{billState(row.bill).text}</p>
+                      </div>
                     </div>
-                    <div className="text-right">
-                      <p>{formatKes(row.bill.amountKes)}</p>
-                      <p className={`text-xs ${billState(row.bill).className}`}>{billState(row.bill).text}</p>
-                    </div>
+                    {editing?.id === row.bill.id && (
+                      <div className="mt-3 grid gap-2 sm:grid-cols-[1fr_8rem_10rem_auto] sm:items-end">
+                        {row.bill.isCharge ? (
+                          <input
+                            value={editing.description}
+                            onChange={(e) => setEditing((b) => b && { ...b, description: e.target.value })}
+                            className={inputClass}
+                          />
+                        ) : (
+                          <span />
+                        )}
+                        <input
+                          type="number"
+                          min={1}
+                          value={editing.amountKes}
+                          onChange={(e) => setEditing((b) => b && { ...b, amountKes: e.target.value })}
+                          className={inputClass}
+                        />
+                        <input
+                          type="date"
+                          value={editing.dueDate}
+                          onChange={(e) => setEditing((b) => b && { ...b, dueDate: e.target.value })}
+                          className={inputClass}
+                        />
+                        <div className="flex gap-2">
+                          <button onClick={saveBill} disabled={busy} className={primaryButton}>
+                            Save
+                          </button>
+                          <button onClick={() => setEditing(null)} className={secondaryButton}>
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
                   </li>
                 ) : (
                   <li key={`p-${row.payment.id}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-[var(--soft)] px-5 py-3 text-sm">
@@ -394,6 +496,10 @@ export default function SitePage() {
                       <p className="text-xs text-[var(--muted)]">
                         {formatDate(row.payment.paidAt)}
                         {row.payment.note ? ` · ${row.payment.note}` : ""}
+                        {" · "}
+                        <button onClick={() => removePayment(row.payment)} className="underline hover:text-[var(--stop)]">
+                          Remove
+                        </button>
                       </p>
                     </div>
                     <p className="font-medium text-[var(--good)]">−{formatKes(row.payment.amountKes)}</p>
@@ -406,7 +512,7 @@ export default function SitePage() {
       </section>
 
       <details className="mt-8 rounded-2xl border border-[var(--line)] bg-[var(--card)] p-5">
-        <summary className="cursor-pointer font-semibold">Billing settings</summary>
+        <summary className="cursor-pointer font-semibold">Settings</summary>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {(
             [
@@ -432,6 +538,15 @@ export default function SitePage() {
             </label>
           ))}
         </div>
+        <label className="mt-3 block text-xs text-[var(--muted)]">
+          Notes (only you see these)
+          <textarea
+            rows={3}
+            value={settings.notes ?? ""}
+            onChange={(e) => setSettings((s) => ({ ...s, notes: e.target.value }))}
+            className={`${inputClass} mt-1`}
+          />
+        </label>
         <p className="mt-3 text-xs text-[var(--muted)]">Price changes apply to bills not yet created. The first bill date can only change before a payment is recorded.</p>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <button
@@ -441,6 +556,29 @@ export default function SitePage() {
           >
             Save
           </button>
+          <div className="flex flex-wrap items-center gap-4">
+          {site.status !== "cancelled" &&
+            (site.manualPause ? (
+              <button
+                onClick={() => call(`/api/services/${id}`, { method: "PATCH", body: JSON.stringify({ pause: false }) }, "Site resumed.")}
+                disabled={busy}
+                className="text-sm font-medium text-[var(--good)] hover:underline"
+              >
+                Resume site
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  if (window.confirm(`Pause ${site.domain} now? Visitors see "temporarily unavailable" until you resume it.`)) {
+                    void call(`/api/services/${id}`, { method: "PATCH", body: JSON.stringify({ pause: true }) }, "Site paused.");
+                  }
+                }}
+                disabled={busy}
+                className="text-sm text-[var(--stop)] hover:underline"
+              >
+                Pause site now
+              </button>
+            ))}
           {site.status === "cancelled" ? (
             <button
               onClick={() => call(`/api/services/${id}`, { method: "PATCH", body: JSON.stringify({ reactivate: true }) }, "Billing resumed.")}
@@ -462,6 +600,7 @@ export default function SitePage() {
               Stop billing
             </button>
           )}
+          </div>
         </div>
       </details>
     </div>

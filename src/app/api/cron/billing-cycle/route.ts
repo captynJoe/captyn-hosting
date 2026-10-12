@@ -60,7 +60,9 @@ export async function POST(request: NextRequest) {
           stats.sitesRestored += 1;
         }
 
-        if (current.status === HostingServiceStatus.suspended) {
+        if (current.manualPause) {
+          // Paused by an admin: no automatic paused/overdue emails.
+        } else if (current.status === HostingServiceStatus.suspended) {
           if (previousStatus !== HostingServiceStatus.suspended) stats.sitesPaused += 1;
           const sinceReminderMs = current.reminderSentAt ? now.getTime() - current.reminderSentAt.getTime() : Infinity;
           const notify =

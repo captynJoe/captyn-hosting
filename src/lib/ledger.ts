@@ -112,6 +112,7 @@ export function nextInvoiceCharge(
 export type ServiceStateInput = {
   status: ServiceStatus;
   suspendAfter: Date | null;
+  manualPause?: boolean;
 };
 
 /**
@@ -119,7 +120,8 @@ export type ServiceStateInput = {
  * payment_due, past due -> overdue, and suspended once the pause date has
  * passed. The pause date is set only when the overdue notice carrying it is
  * sent (see the billing cycle), so a warning always comes first. Clearing
- * the overdue amount lifts a pause. Cancelled is the one status set by hand.
+ * the overdue amount lifts a pause. Set by hand: cancelled, and a manual
+ * pause, which holds whatever the balance until an admin lifts it.
  */
 export function nextServiceState(
   service: ServiceStateInput,
@@ -128,6 +130,9 @@ export function nextServiceState(
 ): { status: ServiceStatus; suspendAfter: Date | null } {
   if (service.status === "cancelled") {
     return { status: "cancelled", suspendAfter: service.suspendAfter };
+  }
+  if (service.manualPause) {
+    return { status: "suspended", suspendAfter: ledger.overdueKes > 0 ? service.suspendAfter : null };
   }
 
   if (ledger.overdueKes > 0) {

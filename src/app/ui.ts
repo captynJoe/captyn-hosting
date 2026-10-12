@@ -18,6 +18,7 @@ export type SiteSummary = {
   billingDayOfMonth: number;
   graceDays: number;
   status: ServiceStatus;
+  manualPause: boolean;
   suspendAfter: string | null;
   reminderSentAt: string | null;
   notes: string | null;
@@ -27,6 +28,7 @@ export type SiteSummary = {
   paidKes: number;
   nextDueDate: string | null;
   payUrl: string | null;
+  invoiceUrl: string | null;
 };
 
 export function formatKes(value: number): string {
@@ -54,6 +56,7 @@ export const TONE_DOT: Record<Tone, string> = {
 /** One line that says where the account stands and what happens next. */
 export function standing(site: SiteSummary): { text: string; tone: Tone } {
   if (site.status === "cancelled") return { text: "Cancelled · not billed", tone: "muted" };
+  if (site.manualPause) return { text: "Paused by admin", tone: "stop" };
   if (site.status === "suspended") return { text: `Paused · ${formatKes(site.overdueKes)} overdue`, tone: "stop" };
   if (site.overdueKes > 0) {
     return {
