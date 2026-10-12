@@ -3,254 +3,394 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "next/navigation";
+import { buildProgress, formatDate, formatKes, standing, TONE_TEXT, type SiteSummary } from "@/app/ui";
 
-type HostingServiceStatus = "active" | "payment_due" | "overdue" | "grace_period" | "suspended" | "cancelled";
-type HostingInvoiceStatus = "pending" | "paid" | "overdue" | "void";
-
-type HostingInvoice = {
+type Bill = {
   id: string;
-  periodStartsAt: string;
-  periodEndsAt: string;
+  label: string;
   dueDate: string;
   amountKes: number;
-  status: HostingInvoiceStatus;
-  paidAt: string | null;
-  mpesaReceiptNumber: string | null;
-  payToken: string;
+  paidKes: number;
+  openKes: number;
+  status: "pending" | "paid" | "overdue" | "void";
 };
 
-type HostingService = {
+type Payment = {
   id: string;
-  customerName: string;
-  customerEmail: string;
-  customerPhone: string | null;
-  domain: string;
-  planName: string;
-  monthlyPriceKes: number;
-  billingDayOfMonth: number;
-  graceDays: number;
-  invoiceLeadDays: number;
-  status: HostingServiceStatus;
-  notes: string | null;
-  invoices: HostingInvoice[];
+  amountKes: number;
+  method: "mpesa" | "manual";
+  receipt: string | null;
+  note: string | null;
+  paidAt: string;
 };
 
-const STATUS_OPTIONS: HostingServiceStatus[] = [
-  "active",
-  "payment_due",
-  "overdue",
-  "grace_period",
-  "suspended",
-  "cancelled",
-];
+type SiteDetail = SiteSummary & { invoices: Bill[]; payments: Payment[] };
 
-function formatKes(value: number): string {
-  return new Intl.NumberFormat("en-KE", {
-    style: "currency",
-    currency: "KES",
-    maximumFractionDigits: 0,
-  }).format(value);
+type StatementRow =
+  | { kind: "bill"; date: string; bill: Bill }
+  | { kind: "payment"; date: string; payment: Payment };
+
+const inputClass =
+  "w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm placeholder:text-[var(--muted)] focus:border-[var(--ink)] focus:outline-none";
+const primaryButton = "rounded-lg bg-[var(--btn)] px-4 py-2 text-sm font-semibold text-[var(--btn-ink)] disabled:opacity-60";
+const secondaryButton =
+  "rounded-lg border border-[var(--line)] px-4 py-2 text-sm font-medium hover:border-[var(--muted)] disabled:opacity-60";
+
+function billState(bill: Bill): { text: string; className: string } {
+  if (bill.openKes <= 0) return { text: "Paid", className: "text-[var(--good)]" };
+  const part = bill.paidKes > 0 ? `${formatKes(bill.openKes)} left` : null;
+  if (bill.status === "overdue") return { text: part || "Overdue", className: "text-[var(--warn)]" };
+  return { text: part || "Due", className: "text-[var(--muted)]" };
 }
 
-export default function ServiceDetailPage() {
+export default function SitePage() {
   const params = useParams();
   const id = typeof params?.id === "string" ? params.id : "";
 
-  const [service, setService] = useState<HostingService | null>(null);
+  const [site, setSite] = useState<SiteDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
+  const [paying, setPaying] = useState(false);
+  const [payment, setPayment] = useState({ amountKes: "", paidAt: "", receipt: "", note: "", emailReceipt: true });
+  const [settings, setSettings] = useState<Record<string, string>>({});
+
+  const applySite = useCallback((next: SiteDetail) => {
+    setSite(next);
+    setSettings({
+      customerName: next.customerName,
+      customerEmail: next.customerEmail,
+      customerPhone: next.customerPhone || "",
+      monthlyPriceKes: String(next.monthlyPriceKes),
+      setupFeeKes: String(next.setupFeeKes || ""),
+      setupInstallmentKes: String(next.setupInstallmentKes || ""),
+      graceDays: String(next.graceDays),
+    });
+  }, []);
 
   const load = useCallback(async () => {
     if (!id) return;
-    setLoading(true);
     setError(null);
     try {
       const response = await fetch(`/api/services/${id}`, { cache: "no-store" });
       const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || "Failed to load hosting service.");
-      setService(data.service);
+      if (!response.ok) throw new Error(data?.error || "Couldn't load this site.");
+      applySite(data.service);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load hosting service.");
+      setError(loadError instanceof Error ? loadError.message : "Couldn't load this site.");
     } finally {
       setLoading(false);
     }
-  }, [id]);
+  }, [id, applySite]);
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  async function updateStatus(status: HostingServiceStatus) {
+  async function call(url: string, init: RequestInit, done: string) {
     setBusy(true);
     setMessage(null);
     try {
-      const response = await fetch(`/api/services/${id}`, {
-        method: "PATCH",
+      const response = await fetch(url, {
+        ...init,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
       });
       const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || "Failed to update status.");
-      setMessage(`Status updated to ${status.replace(/_/g, " ")}.`);
+      if (!response.ok) throw new Error(data?.error || "That didn't work. Try again.");
+      setMessage({ text: done, ok: true });
       await load();
-    } catch (updateError) {
-      setMessage(updateError instanceof Error ? updateError.message : "Failed to update status.");
+      return true;
+    } catch (callError) {
+      setMessage({ text: callError instanceof Error ? callError.message : "That didn't work.", ok: false });
+      return false;
     } finally {
       setBusy(false);
     }
   }
 
-  async function sendInvoiceNow() {
-    setBusy(true);
-    setMessage(null);
-    try {
-      const response = await fetch(`/api/services/${id}/invoices`, { method: "POST" });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || "Failed to send invoice.");
-      setMessage(data.emailSent ? "Invoice created and emailed." : "Invoice created, but email failed to send.");
-      await load();
-    } catch (sendError) {
-      setMessage(sendError instanceof Error ? sendError.message : "Failed to send invoice.");
-    } finally {
-      setBusy(false);
+  async function recordPayment() {
+    const ok = await call(
+      `/api/services/${id}/payments`,
+      { method: "POST", body: JSON.stringify({ ...payment, amountKes: Number(payment.amountKes) }) },
+      `${formatKes(Number(payment.amountKes))} recorded.`
+    );
+    if (ok) {
+      setPaying(false);
+      setPayment({ amountKes: "", paidAt: "", receipt: "", note: "", emailReceipt: true });
     }
   }
 
-  async function markPaid(invoiceId: string) {
-    const note = window.prompt("Note for this manual payment record (optional):") || undefined;
-    setBusy(true);
-    setMessage(null);
+  function openPayment() {
+    setPaying((v) => !v);
+    setPayment((p) => ({ ...p, amountKes: site && site.balanceKes > 0 ? String(Math.round(site.balanceKes)) : "" }));
+  }
+
+  async function copyPayLink() {
+    if (!site?.payUrl) return;
     try {
-      const response = await fetch(`/api/services/${id}/invoices/${invoiceId}/mark-paid`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ note }),
-      });
-      const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || "Failed to mark invoice paid.");
-      setMessage("Invoice marked as paid.");
-      await load();
-    } catch (markError) {
-      setMessage(markError instanceof Error ? markError.message : "Failed to mark invoice paid.");
-    } finally {
-      setBusy(false);
+      await navigator.clipboard.writeText(site.payUrl);
+      setMessage({ text: "Pay link copied.", ok: true });
+    } catch {
+      setMessage({ text: site.payUrl, ok: true });
     }
   }
 
   if (loading) {
-    return <div className="mx-auto max-w-5xl px-4 py-8 text-slate-500">Loading...</div>;
+    return <div className="mx-auto max-w-4xl px-4 py-10 text-sm text-[var(--muted)]">Loading...</div>;
   }
 
-  if (error || !service) {
+  if (error || !site) {
     return (
-      <div className="mx-auto max-w-5xl px-4 py-8">
-        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error || "Hosting service not found."}
-        </div>
+      <div className="mx-auto max-w-4xl px-4 py-10">
+        <Link href="/" className="text-sm text-[var(--muted)] hover:text-[var(--ink)]">
+          ← Sites
+        </Link>
+        <p className="mt-4 text-sm text-[var(--stop)]">{error || "Site not found."}</p>
       </div>
     );
   }
 
+  const state = standing(site);
+  const build = buildProgress(site);
+  const canExtend = site.status === "suspended" || (site.overdueKes > 0 && site.suspendAfter);
+  const statement: StatementRow[] = [
+    ...site.invoices.map((bill) => ({ kind: "bill" as const, date: bill.dueDate, bill })),
+    ...site.payments.map((p) => ({ kind: "payment" as const, date: p.paidAt, payment: p })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
   return (
-    <div className="mx-auto max-w-5xl px-4 py-8">
-      <Link href="/" className="text-sm text-blue-600 hover:underline">
-        ← All services
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:py-10">
+      <Link href="/" className="text-sm text-[var(--muted)] hover:text-[var(--ink)]">
+        ← Sites
       </Link>
 
-      <div className="mt-3 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">{service.customerName}</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            {service.domain} · {service.planName} · {formatKes(service.monthlyPriceKes)}/month
-          </p>
-          <p className="mt-1 text-xs text-slate-400">
-            {service.customerEmail} {service.customerPhone ? `· ${service.customerPhone}` : ""}
-          </p>
-        </div>
-        <select
-          value={service.status}
-          disabled={busy}
-          onChange={(e) => updateStatus(e.target.value as HostingServiceStatus)}
-          className="rounded-lg border px-3 py-2 text-sm"
+      <header className="mt-3">
+        <a
+          href={`https://${site.domain}`}
+          target="_blank"
+          rel="noreferrer"
+          className="break-all text-2xl font-semibold hover:underline"
         >
-          {STATUS_OPTIONS.map((status) => (
-            <option key={status} value={status}>
-              {status.replace(/_/g, " ")}
-            </option>
-          ))}
-        </select>
-      </div>
+          {site.domain}
+        </a>
+        <p className="mt-1 text-sm text-[var(--muted)]">
+          {site.customerName} · {site.customerEmail}
+          {site.customerPhone ? ` · ${site.customerPhone}` : ""}
+        </p>
+      </header>
 
-      {message && (
-        <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-          {message}
+      <section className="mt-6 rounded-2xl border border-[var(--line)] bg-[var(--card)] p-5">
+        <p className="text-4xl font-bold tracking-tight">{formatKes(site.balanceKes)}</p>
+        <p className={`mt-1 text-sm font-medium ${TONE_TEXT[state.tone]}`}>{state.text}</p>
+
+        {build && (
+          <div className="mt-4 max-w-sm">
+            <div className="h-1.5 overflow-hidden rounded-full bg-[var(--soft)]">
+              <div
+                className="h-full rounded-full bg-[var(--ink)]"
+                style={{ width: `${Math.round((build.paidKes / build.totalKes) * 100)}%` }}
+              />
+            </div>
+            <p className="mt-1 text-xs text-[var(--muted)]">
+              Build {formatKes(build.paidKes)} of {formatKes(build.totalKes)} paid
+              {site.setupInstallmentKes > 0 ? ` · ${formatKes(site.setupInstallmentKes)}/month` : ""}, then{" "}
+              {formatKes(site.monthlyPriceKes)}/month hosting
+            </p>
+          </div>
+        )}
+
+        <div className="mt-5 flex flex-wrap gap-2">
+          <button onClick={openPayment} disabled={busy} className={primaryButton}>
+            Record payment
+          </button>
+          {site.balanceKes > 0 && site.status !== "cancelled" && (
+            <button
+              onClick={() => call(`/api/services/${id}/invoices`, { method: "POST" }, `Sent to ${site.customerEmail}.`)}
+              disabled={busy}
+              className={secondaryButton}
+            >
+              Send reminder
+            </button>
+          )}
+          {canExtend && (
+            <button
+              onClick={() =>
+                call(
+                  `/api/services/${id}`,
+                  { method: "PATCH", body: JSON.stringify({ extendDays: 7 }) },
+                  site.status === "suspended" ? "Site back online for 7 days." : "Pause moved 7 days later."
+                )
+              }
+              disabled={busy}
+              className={secondaryButton}
+            >
+              {site.status === "suspended" ? "Unpause for 7 days" : "Give 7 more days"}
+            </button>
+          )}
+          {site.payUrl && site.balanceKes > 0 && (
+            <button onClick={copyPayLink} className={secondaryButton}>
+              Copy pay link
+            </button>
+          )}
         </div>
-      )}
 
-      <div className="mt-6 flex flex-wrap gap-2">
-        <button
-          onClick={sendInvoiceNow}
-          disabled={busy}
-          className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
-        >
-          Send invoice now
-        </button>
-      </div>
+        {message && (
+          <p className={`mt-3 break-all text-sm ${message.ok ? "text-[var(--good)]" : "text-[var(--stop)]"}`}>{message.text}</p>
+        )}
 
-      <div className="mt-8">
-        <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">Invoices</h2>
-        <div className="mt-3 overflow-x-auto rounded-xl border">
-          <table className="w-full min-w-[720px] text-sm">
-            <thead>
-              <tr className="border-b bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900">
-                <th className="px-4 py-3">Period</th>
-                <th className="px-4 py-3">Due date</th>
-                <th className="px-4 py-3">Amount</th>
-                <th className="px-4 py-3">Status</th>
-                <th className="px-4 py-3">Receipt</th>
-                <th className="px-4 py-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {service.invoices.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
-                    No invoices yet.
-                  </td>
-                </tr>
-              ) : (
-                service.invoices.map((invoice) => (
-                  <tr key={invoice.id} className="border-b last:border-0">
-                    <td className="px-4 py-3">
-                      {new Date(invoice.periodStartsAt).toLocaleDateString()} –{" "}
-                      {new Date(invoice.periodEndsAt).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3">{new Date(invoice.dueDate).toLocaleDateString()}</td>
-                    <td className="px-4 py-3">{formatKes(invoice.amountKes)}</td>
-                    <td className="px-4 py-3">
-                      <span className={invoice.status === "overdue" ? "text-red-600" : ""}>{invoice.status}</span>
-                    </td>
-                    <td className="px-4 py-3">{invoice.mpesaReceiptNumber || "—"}</td>
-                    <td className="px-4 py-3">
-                      {invoice.status !== "paid" && (
-                        <button
-                          onClick={() => markPaid(invoice.id)}
-                          disabled={busy}
-                          className="text-xs font-medium text-blue-600 hover:underline disabled:opacity-60"
-                        >
-                          Mark paid
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))
+        {paying && (
+          <div className="mt-5 border-t border-[var(--line)] pt-5">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs text-[var(--muted)]">
+                Amount received (KSh)
+                <input
+                  type="number"
+                  min={1}
+                  value={payment.amountKes}
+                  onChange={(e) => setPayment((p) => ({ ...p, amountKes: e.target.value }))}
+                  className={`${inputClass} mt-1`}
+                />
+              </label>
+              <label className="text-xs text-[var(--muted)]">
+                Date received
+                <input
+                  type="date"
+                  value={payment.paidAt}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setPayment((p) => ({ ...p, paidAt: e.target.value }))}
+                  className={`${inputClass} mt-1`}
+                />
+              </label>
+              <input
+                placeholder="M-Pesa code (optional)"
+                value={payment.receipt}
+                onChange={(e) => setPayment((p) => ({ ...p, receipt: e.target.value }))}
+                className={inputClass}
+              />
+              <input
+                placeholder="Note (optional)"
+                value={payment.note}
+                onChange={(e) => setPayment((p) => ({ ...p, note: e.target.value }))}
+                className={inputClass}
+              />
+            </div>
+            <label className="mt-3 flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={payment.emailReceipt}
+                onChange={(e) => setPayment((p) => ({ ...p, emailReceipt: e.target.checked }))}
+              />
+              Email a receipt to {site.customerEmail}
+            </label>
+            <button
+              onClick={recordPayment}
+              disabled={busy || !(Number(payment.amountKes) > 0)}
+              className={`${primaryButton} mt-4`}
+            >
+              Save {Number(payment.amountKes) > 0 ? formatKes(Number(payment.amountKes)) : "payment"}
+            </button>
+          </div>
+        )}
+      </section>
+
+      <section className="mt-8">
+        <h2 className="font-semibold">Statement</h2>
+        <div className="mt-3 overflow-hidden rounded-2xl border border-[var(--line)] bg-[var(--card)]">
+          {statement.length === 0 ? (
+            <p className="px-5 py-8 text-center text-sm text-[var(--muted)]">No bills yet.</p>
+          ) : (
+            <ul className="divide-y divide-[var(--line)]">
+              {statement.map((row) =>
+                row.kind === "bill" ? (
+                  <li key={`b-${row.bill.id}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 px-5 py-3 text-sm">
+                    <div className="min-w-0">
+                      <p>{row.bill.label}</p>
+                      <p className="text-xs text-[var(--muted)]">Due {formatDate(row.bill.dueDate)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p>{formatKes(row.bill.amountKes)}</p>
+                      <p className={`text-xs ${billState(row.bill).className}`}>{billState(row.bill).text}</p>
+                    </div>
+                  </li>
+                ) : (
+                  <li key={`p-${row.payment.id}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1 bg-[var(--soft)] px-5 py-3 text-sm">
+                    <div className="min-w-0">
+                      <p>
+                        Payment · {row.payment.method === "mpesa" ? "M-Pesa" : "recorded"}
+                        {row.payment.receipt ? ` · ${row.payment.receipt}` : ""}
+                      </p>
+                      <p className="text-xs text-[var(--muted)]">
+                        {formatDate(row.payment.paidAt)}
+                        {row.payment.note ? ` · ${row.payment.note}` : ""}
+                      </p>
+                    </div>
+                    <p className="font-medium text-[var(--good)]">−{formatKes(row.payment.amountKes)}</p>
+                  </li>
+                )
               )}
-            </tbody>
-          </table>
+            </ul>
+          )}
         </div>
-      </div>
+      </section>
+
+      <details className="mt-8 rounded-2xl border border-[var(--line)] bg-[var(--card)] p-5">
+        <summary className="cursor-pointer font-semibold">Billing settings</summary>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          {(
+            [
+              ["customerName", "Business name", "text"],
+              ["customerEmail", "Billing email", "email"],
+              ["customerPhone", "M-Pesa phone", "tel"],
+              ["monthlyPriceKes", "Hosting per month (KSh)", "number"],
+              ["setupFeeKes", "Build fee (KSh)", "number"],
+              ["setupInstallmentKes", "Build fee per month (KSh)", "number"],
+              ["graceDays", "Days from first overdue notice to pause", "number"],
+            ] as const
+          ).map(([key, label, type]) => (
+            <label key={key} className="text-xs text-[var(--muted)]">
+              {label}
+              <input
+                type={type}
+                value={settings[key] ?? ""}
+                onChange={(e) => setSettings((s) => ({ ...s, [key]: e.target.value }))}
+                className={`${inputClass} mt-1`}
+              />
+            </label>
+          ))}
+        </div>
+        <p className="mt-3 text-xs text-[var(--muted)]">Price changes apply to bills not yet created.</p>
+        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+          <button
+            onClick={() => call(`/api/services/${id}`, { method: "PATCH", body: JSON.stringify(settings) }, "Saved.")}
+            disabled={busy}
+            className={primaryButton}
+          >
+            Save
+          </button>
+          {site.status === "cancelled" ? (
+            <button
+              onClick={() => call(`/api/services/${id}`, { method: "PATCH", body: JSON.stringify({ reactivate: true }) }, "Billing resumed.")}
+              disabled={busy}
+              className="text-sm text-[var(--muted)] hover:text-[var(--ink)]"
+            >
+              Resume billing
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                if (window.confirm(`Stop billing ${site.domain}? No more bills or reminders go out.`)) {
+                  void call(`/api/services/${id}`, { method: "PATCH", body: JSON.stringify({ cancel: true }) }, "Billing stopped.");
+                }
+              }}
+              disabled={busy}
+              className="text-sm text-[var(--stop)] hover:underline"
+            >
+              Stop billing
+            </button>
+          )}
+        </div>
+      </details>
     </div>
   );
 }

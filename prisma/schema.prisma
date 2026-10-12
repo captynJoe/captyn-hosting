@@ -62,9 +62,15 @@ model HostingService {
   invoiceLeadDays   Int                  @default(5)
   status            HostingServiceStatus @default(active)
   notes             String?
+  setupFeeKes         Float                @default(0)
+  setupInstallmentKes Float                @default(0)
+  billingStartsAt     DateTime?
+  suspendAfter        DateTime?
+  reminderSentAt      DateTime?
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
   invoices          HostingInvoice[]
+  payments          HostingPayment[]
 
   @@index([status])
   @@index([businessProfileId])
@@ -78,6 +84,7 @@ model HostingInvoice {
   periodStartsAt     DateTime
   periodEndsAt       DateTime
   amountKes          Float
+  setupPortionKes    Float                @default(0)
   dueDate            DateTime
   status             HostingInvoiceStatus @default(pending)
   payToken           String               @unique @default(cuid())
@@ -94,4 +101,34 @@ model HostingInvoice {
   @@index([status, dueDate])
   @@index([checkoutRequestId])
   @@map("hosting_invoices")
+}
+
+enum HostingPaymentMethod {
+  mpesa
+  manual
+}
+
+enum HostingPaymentStatus {
+  pending
+  completed
+  failed
+}
+
+model HostingPayment {
+  id                 String               @id @default(cuid())
+  hostingServiceId   String
+  amountKes          Float
+  method             HostingPaymentMethod
+  status             HostingPaymentStatus @default(pending)
+  checkoutRequestId  String?              @unique
+  mpesaReceiptNumber String?
+  phoneNumber        String?
+  note               String?
+  paidAt             DateTime?
+  createdAt          DateTime             @default(now())
+  updatedAt          DateTime             @updatedAt
+  hostingService     HostingService       @relation(fields: [hostingServiceId], references: [id], onDelete: Cascade)
+
+  @@index([hostingServiceId, status])
+  @@map("hosting_payments")
 }

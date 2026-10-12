@@ -1,7 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, isValidSessionToken } from "@/lib/session";
 
-const PUBLIC_PATHS = [/^\/login$/, /^\/pay\//, /^\/api\/invoice\//, /^\/api\/cron\//, /^\/api\/auth\/login$/];
+// /site/* and /api/site-status are reached only through a customer
+// domain's nginx block (see nginx/captyn-hosting-site.conf).
+const PUBLIC_PATHS = [
+  /^\/login$/,
+  /^\/pay\//,
+  /^\/p\//,
+  /^\/api\/invoice\//,
+  /^\/api\/cron\//,
+  /^\/api\/auth\/login$/,
+  /^\/api\/site-status$/,
+  /^\/site\//,
+];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some((pattern) => pattern.test(pathname));

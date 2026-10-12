@@ -1,86 +1,81 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-
-type HostingServiceStatus = "active" | "payment_due" | "overdue" | "grace_period" | "suspended" | "cancelled";
-
-type HostingInvoiceSummary = {
-  id: string;
-  status: "pending" | "paid" | "overdue" | "void";
-  dueDate: string;
-  amountKes: number;
-};
-
-type HostingServiceRow = {
-  id: string;
-  customerName: string;
-  customerEmail: string;
-  domain: string;
-  planName: string;
-  monthlyPriceKes: number;
-  status: HostingServiceStatus;
-  createdAt: string;
-  latestInvoice: HostingInvoiceSummary | null;
-};
+import { buildProgress, formatDate, formatKes, standing, TONE_DOT, TONE_TEXT, type SiteSummary } from "@/app/ui";
 
 type Summary = {
-  activeCount: number;
-  totalCount: number;
-  mrrKes: number;
-  overdueInvoiceCount: number;
+  owedKes: number;
+  overdueKes: number;
+  collectedThisMonthKes: number;
+  monthlyHostingKes: number;
 };
-
-const STATUS_BADGE_CLASS: Record<HostingServiceStatus, string> = {
-  active: "bg-emerald-100 text-emerald-800",
-  payment_due: "bg-amber-100 text-amber-800",
-  overdue: "bg-red-100 text-red-800",
-  grace_period: "bg-orange-100 text-orange-800",
-  suspended: "bg-slate-200 text-slate-700",
-  cancelled: "bg-slate-100 text-slate-500",
-};
-
-function formatKes(value: number): string {
-  return new Intl.NumberFormat("en-KE", {
-    style: "currency",
-    currency: "KES",
-    maximumFractionDigits: 0,
-  }).format(value);
-}
 
 const EMPTY_FORM = {
   customerName: "",
   customerEmail: "",
   customerPhone: "",
   domain: "",
-  planName: "",
   monthlyPriceKes: "",
-  billingDayOfMonth: "1",
+  billingStartsAt: new Date().toISOString().slice(0, 10),
+  setupFeeKes: "",
+  setupInstallmentKes: "",
 };
+
+const inputClass =
+  "w-full rounded-lg border border-[var(--line)] px-3 py-2 text-sm placeholder:text-[var(--muted)] focus:border-[var(--ink)] focus:outline-none";
+
+/** "3 past bills (KSh 9,000) are added now", so the operator sees the effect of the date before saving. */
+function billingPreview(form: typeof EMPTY_FORM): string | null {
+  const hosting = Number(form.monthlyPriceKes) || 0;
+  const build = Number(form.setupFeeKes) || 0;
+  const installment = Number(form.setupInstallmentKes) || build;
+  if (!hosting) return null;
+  const parts: string[] = [];
+  if (build > 0) {
+    const months = Math.ceil(build / Math.max(1, installment));
+    parts.push(
+      `${formatKes(Math.min(installment, build))}/month for ${months} month${months === 1 ? "" : "s"} (build), then ${formatKes(hosting)}/month`
+    );
+  } else {
+    parts.push(`${formatKes(hosting)}/month`);
+  }
+  const start = new Date(`${form.billingStartsAt}T00:00:00Z`);
+  if (!Number.isNaN(start.getTime())) {
+    const now = new Date();
+    let past = 0;
+    const cursor = new Date(start);
+    while (cursor.getTime() <= now.getTime() && past < 36) {
+      past += 1;
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1);
+    }
+    if (past > 0) parts.push(`${past} bill${past === 1 ? "" : "s"} from ${formatDate(start)} to today are added now`);
+  }
+  return parts.join(" · ");
+}
 
 export default function DashboardPage() {
   const router = useRouter();
-  const [services, setServices] = useState<HostingServiceRow[]>([]);
+  const [sites, setSites] = useState<SiteSummary[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
+  const [adding, setAdding] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
-  const [creating, setCreating] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
     setError(null);
     try {
       const response = await fetch("/api/services", { cache: "no-store" });
       const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || "Failed to load hosting services.");
-      setServices(data.services || []);
+      if (!response.ok) throw new Error(data?.error || "Couldn't load sites.");
+      setSites(data.services || []);
       setSummary(data.summary || null);
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "Failed to load hosting services.");
+      setError(loadError instanceof Error ? loadError.message : "Couldn't load sites.");
     } finally {
       setLoading(false);
     }
@@ -90,29 +85,24 @@ export default function DashboardPage() {
     void load();
   }, [load]);
 
-  async function createService() {
-    setCreating(true);
-    setMessage(null);
+  const preview = useMemo(() => billingPreview(form), [form]);
+  const monthName = new Date().toLocaleDateString("en-KE", { month: "long" });
+
+  async function addSite() {
+    setSaving(true);
+    setFormError(null);
     try {
       const response = await fetch("/api/services", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          monthlyPriceKes: Number(form.monthlyPriceKes),
-          billingDayOfMonth: Number(form.billingDayOfMonth),
-        }),
+        body: JSON.stringify(form),
       });
       const data = await response.json().catch(() => null);
-      if (!response.ok) throw new Error(data?.error || "Failed to create hosting service.");
-      setMessage("Hosting service created.");
-      setForm(EMPTY_FORM);
-      setShowCreate(false);
-      await load();
-    } catch (createError) {
-      setMessage(createError instanceof Error ? createError.message : "Failed to create hosting service.");
-    } finally {
-      setCreating(false);
+      if (!response.ok) throw new Error(data?.error || "Couldn't add the site.");
+      router.push(`/services/${data.service.id}`);
+    } catch (addError) {
+      setFormError(addError instanceof Error ? addError.message : "Couldn't add the site.");
+      setSaving(false);
     }
   }
 
@@ -122,178 +112,138 @@ export default function DashboardPage() {
     router.refresh();
   }
 
+  const field = (key: keyof typeof EMPTY_FORM) => ({
+    value: form[key],
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) => setForm((f) => ({ ...f, [key]: e.target.value })),
+  });
+
   return (
-    <div className="mx-auto max-w-7xl px-4 py-8">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold">CAPTYN Hosting</h1>
-          <p className="mt-1 text-sm text-slate-500">
-            Managed websites CAPTYN hosts and bills on behalf of customers.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setShowCreate((v) => !v)}
-            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700"
-          >
-            {showCreate ? "Cancel" : "New service"}
-          </button>
-          <button
-            onClick={logout}
-            className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
-          >
+    <div className="mx-auto max-w-4xl px-4 py-8 sm:py-10">
+      <header className="flex items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold">CAPTYN Hosting</h1>
+        <div className="flex items-center gap-4">
+          <button onClick={logout} className="text-sm text-[var(--muted)] hover:text-[var(--ink)]">
             Sign out
           </button>
-        </div>
-      </div>
-
-      {summary && (
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="rounded-xl border px-4 py-3">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Active services</p>
-            <p className="mt-1 text-lg font-semibold">{summary.activeCount}</p>
-          </div>
-          <div className="rounded-xl border px-4 py-3">
-            <p className="text-xs uppercase tracking-wide text-slate-500">MRR</p>
-            <p className="mt-1 text-lg font-semibold">{formatKes(summary.mrrKes)}</p>
-          </div>
-          <div className="rounded-xl border px-4 py-3">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Overdue invoices</p>
-            <p className="mt-1 text-lg font-semibold text-red-600">{summary.overdueInvoiceCount}</p>
-          </div>
-          <div className="rounded-xl border px-4 py-3">
-            <p className="text-xs uppercase tracking-wide text-slate-500">Total services</p>
-            <p className="mt-1 text-lg font-semibold">{summary.totalCount}</p>
-          </div>
-        </div>
-      )}
-
-      {message && (
-        <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
-          {message}
-        </div>
-      )}
-
-      {showCreate && (
-        <div className="mt-6 rounded-xl border p-5">
-          <h2 className="text-sm font-semibold">Create hosting service</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <input
-              placeholder="Customer name"
-              value={form.customerName}
-              onChange={(e) => setForm((f) => ({ ...f, customerName: e.target.value }))}
-              className="rounded-md border px-3 py-2 text-sm"
-            />
-            <input
-              placeholder="Customer email"
-              value={form.customerEmail}
-              onChange={(e) => setForm((f) => ({ ...f, customerEmail: e.target.value }))}
-              className="rounded-md border px-3 py-2 text-sm"
-            />
-            <input
-              placeholder="Customer phone (optional)"
-              value={form.customerPhone}
-              onChange={(e) => setForm((f) => ({ ...f, customerPhone: e.target.value }))}
-              className="rounded-md border px-3 py-2 text-sm"
-            />
-            <input
-              placeholder="Domain (e.g. devoilessentials.com)"
-              value={form.domain}
-              onChange={(e) => setForm((f) => ({ ...f, domain: e.target.value }))}
-              className="rounded-md border px-3 py-2 text-sm"
-            />
-            <input
-              placeholder="Plan name (e.g. Managed Basic)"
-              value={form.planName}
-              onChange={(e) => setForm((f) => ({ ...f, planName: e.target.value }))}
-              className="rounded-md border px-3 py-2 text-sm"
-            />
-            <input
-              type="number"
-              placeholder="Monthly price (KES)"
-              value={form.monthlyPriceKes}
-              onChange={(e) => setForm((f) => ({ ...f, monthlyPriceKes: e.target.value }))}
-              className="rounded-md border px-3 py-2 text-sm"
-            />
-            <input
-              type="number"
-              min={1}
-              max={28}
-              placeholder="Billing day of month"
-              value={form.billingDayOfMonth}
-              onChange={(e) => setForm((f) => ({ ...f, billingDayOfMonth: e.target.value }))}
-              className="rounded-md border px-3 py-2 text-sm"
-            />
-          </div>
           <button
-            onClick={createService}
-            disabled={creating}
-            className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-700 disabled:opacity-60"
+            onClick={() => setAdding((v) => !v)}
+            className="rounded-lg bg-[var(--btn)] px-4 py-2 text-sm font-semibold text-[var(--btn-ink)]"
           >
-            {creating ? "Creating..." : "Create service"}
+            {adding ? "Close" : "Add site"}
           </button>
         </div>
-      )}
+      </header>
 
-      {error && (
-        <div className="mt-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
+      {summary && (
+        <div className="mt-6 grid grid-cols-1 divide-y divide-[var(--line)] rounded-2xl border border-[var(--line)] bg-[var(--card)] sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+          <div className="px-5 py-4">
+            <p className="text-2xl font-semibold">{formatKes(summary.owedKes)}</p>
+            <p className="text-sm text-[var(--muted)]">
+              owed
+              {summary.overdueKes > 0 && (
+                <span className="text-[var(--warn)]"> · {formatKes(summary.overdueKes)} overdue</span>
+              )}
+            </p>
+          </div>
+          <div className="px-5 py-4">
+            <p className="text-2xl font-semibold">{formatKes(summary.collectedThisMonthKes)}</p>
+            <p className="text-sm text-[var(--muted)]">collected in {monthName}</p>
+          </div>
+          <div className="px-5 py-4">
+            <p className="text-2xl font-semibold">{formatKes(summary.monthlyHostingKes)}</p>
+            <p className="text-sm text-[var(--muted)]">hosting a month</p>
+          </div>
         </div>
       )}
 
-      <div className="mt-6 overflow-x-auto rounded-xl border">
-        <table className="w-full min-w-[900px] text-sm">
-          <thead>
-            <tr className="border-b bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500 dark:bg-slate-900">
-              <th className="px-4 py-3">Business</th>
-              <th className="px-4 py-3">Domain</th>
-              <th className="px-4 py-3">Plan</th>
-              <th className="px-4 py-3">Monthly</th>
-              <th className="px-4 py-3">Latest invoice</th>
-              <th className="px-4 py-3">Status</th>
-            </tr>
-          </thead>
-          <tbody>
-            {loading ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">Loading...</td>
-              </tr>
-            ) : services.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-8 text-center text-slate-500">No hosting services yet.</td>
-              </tr>
-            ) : (
-              services.map((service) => (
-                <tr key={service.id} className="border-b last:border-0">
-                  <td className="px-4 py-3">
-                    <Link href={`/services/${service.id}`} className="font-medium text-blue-600 hover:underline">
-                      {service.customerName}
-                    </Link>
-                    <p className="text-xs text-slate-400">{service.customerEmail}</p>
-                  </td>
-                  <td className="px-4 py-3">{service.domain}</td>
-                  <td className="px-4 py-3">{service.planName}</td>
-                  <td className="px-4 py-3">{formatKes(service.monthlyPriceKes)}</td>
-                  <td className="px-4 py-3">
-                    {service.latestInvoice ? (
-                      <span className={service.latestInvoice.status === "overdue" ? "text-red-600" : ""}>
-                        {formatKes(service.latestInvoice.amountKes)} · {service.latestInvoice.status}
-                      </span>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className={`rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_BADGE_CLASS[service.status]}`}>
-                      {service.status.replace(/_/g, " ")}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      {adding && (
+        <section className="mt-6 rounded-2xl border border-[var(--line)] bg-[var(--card)] p-5">
+          <h2 className="font-semibold">Add site</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <input placeholder="Domain, e.g. devoilessentials.com" className={inputClass} {...field("domain")} />
+            <input placeholder="Business name" className={inputClass} {...field("customerName")} />
+            <input type="email" placeholder="Billing email" className={inputClass} {...field("customerEmail")} />
+            <input type="tel" placeholder="M-Pesa phone" className={inputClass} {...field("customerPhone")} />
+          </div>
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs text-[var(--muted)]">
+              Hosting per month (KSh)
+              <input type="number" min={1} placeholder="700" className={`${inputClass} mt-1`} {...field("monthlyPriceKes")} />
+            </label>
+            <label className="text-xs text-[var(--muted)]">
+              First bill date
+              <input type="date" className={`${inputClass} mt-1`} {...field("billingStartsAt")} />
+            </label>
+            <label className="text-xs text-[var(--muted)]">
+              Build fee (KSh), if any
+              <input type="number" min={0} placeholder="12000" className={`${inputClass} mt-1`} {...field("setupFeeKes")} />
+            </label>
+            <label className="text-xs text-[var(--muted)]">
+              Build fee paid per month (KSh)
+              <input type="number" min={0} placeholder="3000" className={`${inputClass} mt-1`} {...field("setupInstallmentKes")} />
+            </label>
+          </div>
+          {preview && <p className="mt-3 text-sm text-[var(--muted)]">{preview}</p>}
+          {formError && <p className="mt-3 text-sm text-[var(--stop)]">{formError}</p>}
+          <button
+            onClick={addSite}
+            disabled={saving}
+            className="mt-4 rounded-lg bg-[var(--btn)] px-4 py-2 text-sm font-semibold text-[var(--btn-ink)] disabled:opacity-60"
+          >
+            {saving ? "Adding..." : "Add site"}
+          </button>
+        </section>
+      )}
+
+      {error && <p className="mt-6 text-sm text-[var(--stop)]">{error}</p>}
+
+      <ul className="mt-6 space-y-2">
+        {loading ? (
+          <li className="py-10 text-center text-sm text-[var(--muted)]">Loading...</li>
+        ) : sites.length === 0 ? (
+          <li className="py-10 text-center text-sm text-[var(--muted)]">No sites yet.</li>
+        ) : (
+          sites.map((site) => {
+            const state = standing(site);
+            const build = buildProgress(site);
+            return (
+              <li key={site.id}>
+                <Link
+                  href={`/services/${site.id}`}
+                  className={`block rounded-2xl border border-[var(--line)] bg-[var(--card)] px-5 py-4 transition hover:border-[var(--muted)] ${
+                    site.status === "cancelled" ? "opacity-60" : ""
+                  }`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1">
+                    <div className="min-w-0">
+                      <p className="truncate font-semibold">{site.domain}</p>
+                      <p className="truncate text-sm text-[var(--muted)]">{site.customerName}</p>
+                    </div>
+                    <p className="text-sm text-[var(--muted)]">{formatKes(site.monthlyPriceKes)}/mo</p>
+                  </div>
+                  <p className={`mt-2 flex items-center gap-2 text-sm font-medium ${TONE_TEXT[state.tone]}`}>
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${TONE_DOT[state.tone]}`} />
+                    {state.text}
+                  </p>
+                  {build && build.paidKes < build.totalKes && (
+                    <div className="mt-3">
+                      <div className="h-1.5 overflow-hidden rounded-full bg-[var(--soft)]">
+                        <div
+                          className="h-full rounded-full bg-[var(--ink)]"
+                          style={{ width: `${Math.round((build.paidKes / build.totalKes) * 100)}%` }}
+                        />
+                      </div>
+                      <p className="mt-1 text-xs text-[var(--muted)]">
+                        Build {formatKes(build.paidKes)} of {formatKes(build.totalKes)} paid
+                      </p>
+                    </div>
+                  )}
+                </Link>
+              </li>
+            );
+          })
+        )}
+      </ul>
     </div>
   );
 }

@@ -1,10 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { HostingInvoiceStatus } from "@prisma/client";
+import { generateDueInvoices, syncService } from "@/lib/hostingBilling";
 import { prisma } from "@/lib/prisma";
-import { computeNextInvoicePeriod } from "@/lib/hostingBilling";
-import { generateHostingInvoiceDueEmail } from "@/lib/emailTemplates";
-import { sendEmail } from "@/lib/email";
+import { sendBalanceNotice } from "@/lib/notices";
 
+/** Send the customer their balance now: a bill, an overdue notice or a paused notice. */
 export async function POST(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -16,55 +15,18 @@ export async function POST(
     if (!service) {
       return NextResponse.json({ error: "Hosting service not found" }, { status: 404 });
     }
-
-    const lastInvoice = await prisma.hostingInvoice.findFirst({
-      where: { hostingServiceId: id },
-      orderBy: { periodStartsAt: "desc" },
-      select: { periodStartsAt: true },
-    });
-    const period = computeNextInvoicePeriod(service, lastInvoice?.periodStartsAt ?? null);
-
-    const invoice = await prisma.hostingInvoice.upsert({
-      where: {
-        hostingServiceId_periodStartsAt: {
-          hostingServiceId: id,
-          periodStartsAt: period.periodStartsAt,
-        },
-      },
-      update: {},
-      create: {
-        hostingServiceId: id,
-        periodStartsAt: period.periodStartsAt,
-        periodEndsAt: period.periodEndsAt,
-        dueDate: period.dueDate,
-        amountKes: service.monthlyPriceKes,
-        status: HostingInvoiceStatus.pending,
-      },
-    });
-
-    const baseUrl = process.env.HOSTING_APP_BASE_URL || "http://localhost:3100";
-    const payUrl = `${baseUrl}/pay/${invoice.payToken}`;
-    const { subject, html, text } = generateHostingInvoiceDueEmail({
-      customerName: service.customerName,
-      domain: service.domain,
-      amountKes: invoice.amountKes,
-      dueDateLabel: invoice.dueDate.toLocaleDateString("en-KE", { day: "numeric", month: "short", year: "numeric" }),
-      payUrl,
-      isOverdue: invoice.status === HostingInvoiceStatus.overdue,
-    });
-    const sent = await sendEmail({ to: service.customerEmail, subject, html, text });
-
-    if (sent) {
-      const reminders = (invoice.remindersSentAt as Record<string, string> | null) || {};
-      await prisma.hostingInvoice.update({
-        where: { id: invoice.id },
-        data: { remindersSentAt: { ...reminders, due: new Date().toISOString() } },
-      });
+    await generateDueInvoices(service);
+    const synced = await syncService(id);
+    if (!synced || synced.ledger.balanceKes <= 0) {
+      return NextResponse.json({ error: "Nothing is owed right now" }, { status: 409 });
     }
-
-    return NextResponse.json({ success: true, invoice, emailSent: sent });
+    const sent = await sendBalanceNotice(synced.service, synced.ledger);
+    if (!sent) {
+      return NextResponse.json({ error: "The email didn't send. Try again." }, { status: 502 });
+    }
+    return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("Failed to create/send hosting invoice:", error);
-    return NextResponse.json({ error: "Failed to create/send hosting invoice" }, { status: 500 });
+    console.error("Failed to send hosting reminder:", error);
+    return NextResponse.json({ error: "Failed to send reminder" }, { status: 500 });
   }
 }

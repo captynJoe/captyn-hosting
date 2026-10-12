@@ -14,10 +14,12 @@ This is a separate Next.js app, but it is **not** fully isolated:
   — this project's `prisma/schema.prisma` only describes those two tables so
   its own Prisma Client can read/write them. **Never run `prisma migrate
   dev|deploy` from this project** — only `prisma generate`.
-- **M-Pesa**: this app has no Daraja credentials. The public pay page
-  (`/pay/[token]`) calls byg-global's `/api/payments/mpesa/hosting/initialize`
-  directly from the browser (cross-origin fetch, CORS-allowed for this app's
-  origin via byg-global's `HOSTING_APP_ALLOWED_ORIGINS`). Settlement (the
+- **M-Pesa**: this app has no Daraja credentials. The pay pages
+  (`/p/[token]`, and `/captyn-hosting/pay` on customer domains) post to this
+  app, which calls byg-global's `/api/payments/mpesa/hosting/initialize`
+  server-side (`BYG_GLOBAL_INTERNAL_URL`, else
+  `NEXT_PUBLIC_BYG_GLOBAL_BASE_URL`). That route charges the service balance
+  (or a smaller amount the payer picks) and records a pending payment. Settlement (the
   M-Pesa webhook) also lives in byg-global, since that's where Safaricom's
   callback URL is registered.
 - **Email**: sent independently via the same shared n8n "send-email" webhook
@@ -29,10 +31,8 @@ This is a separate Next.js app, but it is **not** fully isolated:
   separate password for this app. This app's own session cookie is
   independent of byg-global's (no shared NextAuth session, no SSO). See
   `src/lib/adminAuth.ts` and `src/proxy.ts`.
-- **Ops alerting**: overdue invoices are only logged (`console.warn`) right
-  now — they are *not* pushed into byg-global's Ops Inbox, since that would
-  require a second, reverse cross-project dependency this app doesn't have
-  yet. Revisit if that visibility gap becomes a problem in practice.
+- **Ops alerting**: overdue accounts are emailed and shown first on the
+  dashboard; nothing is pushed into byg-global's Ops Inbox.
 
 ## Running locally
 
@@ -43,13 +43,44 @@ npx prisma generate
 npm run dev                  # http://localhost:3100
 ```
 
-## Billing cycle
+## Billing
 
-Nothing runs automatically. `POST /api/cron/billing-cycle` (header
-`x-internal-key: $HOSTING_AUTOMATION_KEY`) generates upcoming invoices,
-sends due/overdue reminder emails, and marks invoices overdue. Schedule it
-to run daily from n8n or any external cron — same pattern byg-global uses
-for its own automation routes.
+- **Ledger**: balance = bills (`hosting_invoices`) − completed payments
+  (`hosting_payments`). Payments settle the oldest bills first, so partial
+  payments and overpayments need no allocation records. Rules live in
+  `src/lib/ledger.ts` (pure).
+- **Build fee**: a site can carry a build fee billed in monthly installments
+  (`setupFeeKes` / `setupInstallmentKes`); hosting (`monthlyPriceKes`)
+  starts the month after the build fee is fully billed.
+- **First bill date** (`billingStartsAt`): adding a site with a past date
+  bills those months immediately (no emails), so earlier payments can be
+  recorded before the first notice goes out.
+- **Statuses** follow the ledger: `active` (paid up), `payment_due`,
+  `overdue`, `suspended`, plus `cancelled` set by hand.
+
+## Daily run
+
+`POST /api/cron/billing-cycle` (header `x-internal-key:
+$HOSTING_AUTOMATION_KEY`) must run once a day. It creates bills due within
+`invoiceLeadDays`, emails new bills, sends an overdue notice that sets the
+pause date (`graceDays` out, repeated every 3 days), and pauses sites whose
+pause date has passed (weekly paused reminders). A site is never paused
+before an overdue notice carrying the date has been sent. From the VPS6 host:
+
+```
+0 6 * * * docker exec captyn-hosting sh -c 'wget -qO- --header="x-internal-key: $HOSTING_AUTOMATION_KEY" --post-data= http://127.0.0.1:3100/api/cron/billing-cycle' >> /var/log/captyn-hosting-billing.log 2>&1
+```
+
+## Customer domains (pause + pay on their domain)
+
+A customer's HTTPS server block in the edge nginx template includes
+`/etc/nginx/snippets/captyn-hosting-site.conf` (byg-global repo). Every
+request asks `/api/site-status` (cached 20 s, fails open: if this app is
+down the site is served); a paused site shows a neutral "temporarily
+unavailable" page with a link to `https://<domain>/captyn-hosting/pay`,
+which pays the balance by M-Pesa. Paying lifts the pause within a minute.
+The hosting.captyn.shop block strips `X-Hosting-Domain` so only a customer
+block can name the domain.
 
 ## Deployment (VPS6)
 

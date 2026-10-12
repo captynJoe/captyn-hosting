@@ -2,19 +2,55 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  --bg: #f4f6f9;
+  --card: #ffffff;
+  --ink: #0f172a;
+  --muted: #64748b;
+  --line: #e2e8f0;
+  --soft: #f1f5f9;
+  --btn: #0f172a;
+  --btn-ink: #ffffff;
+  --warn: #b45309;
+  --warn-soft: #fef3c7;
+  --stop: #b91c1c;
+  --stop-soft: #fee2e2;
+  --good: #047857;
+  --good-soft: #d1fae5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0b1120;
+    --card: #111827;
+    --ink: #f1f5f9;
+    --muted: #94a3b8;
+    --line: #1f2937;
+    --soft: #1a2333;
+    --btn: #f1f5f9;
+    --btn-ink: #0b1120;
+    --warn: #fbbf24;
+    --warn-soft: #3a2a0a;
+    --stop: #f87171;
+    --stop-soft: #3b1212;
+    --good: #34d399;
+    --good-soft: #0c2e24;
+  }
+}
+
 html,
 body {
   height: 100%;
 }
 
 body {
-  background-color: #f8fafc;
-  color: #0f172a;
+  background-color: var(--bg);
+  color: var(--ink);
 }
 
-@media (prefers-color-scheme: dark) {
-  body {
-    background-color: #0f172a;
-    color: #f1f5f9;
-  }
+input,
+select,
+textarea {
+  background: transparent;
+  color: var(--ink);
 }
