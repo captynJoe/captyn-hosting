@@ -142,3 +142,8 @@ export function normalizeDomain(value: string): string {
     .replace(/:\d+$/, "")
     .replace(/^www\./, "");
 }
+
+/** A bare hostname like example.co.ke: no @, spaces, scheme or path. */
+export function isValidDomain(value: string): boolean {
+  return /^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(value);
+}

@@ -160,7 +160,7 @@ export default function DashboardPage() {
         <section className="mt-6 rounded-2xl border border-[var(--line)] bg-[var(--card)] p-5">
           <h2 className="font-semibold">Add site</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <input placeholder="Domain, e.g. devoilessentials.com" className={inputClass} {...field("domain")} />
+            <input placeholder="Domain" className={inputClass} {...field("domain")} />
             <input placeholder="Business name" className={inputClass} {...field("customerName")} />
             <input type="email" placeholder="Billing email" className={inputClass} {...field("customerEmail")} />
             <input type="tel" placeholder="M-Pesa phone" className={inputClass} {...field("customerPhone")} />
@@ -168,7 +168,7 @@ export default function DashboardPage() {
           <div className="mt-3 grid gap-3 sm:grid-cols-2">
             <label className="text-xs text-[var(--muted)]">
               Hosting per month (KSh)
-              <input type="number" min={1} placeholder="700" className={`${inputClass} mt-1`} {...field("monthlyPriceKes")} />
+              <input type="number" min={1} className={`${inputClass} mt-1`} {...field("monthlyPriceKes")} />
             </label>
             <label className="text-xs text-[var(--muted)]">
               First bill date
@@ -176,11 +176,11 @@ export default function DashboardPage() {
             </label>
             <label className="text-xs text-[var(--muted)]">
               Build fee (KSh), if any
-              <input type="number" min={0} placeholder="12000" className={`${inputClass} mt-1`} {...field("setupFeeKes")} />
+              <input type="number" min={0} className={`${inputClass} mt-1`} {...field("setupFeeKes")} />
             </label>
             <label className="text-xs text-[var(--muted)]">
               Build fee paid per month (KSh)
-              <input type="number" min={0} placeholder="3000" className={`${inputClass} mt-1`} {...field("setupInstallmentKes")} />
+              <input type="number" min={0} className={`${inputClass} mt-1`} {...field("setupInstallmentKes")} />
             </label>
           </div>
           {preview && <p className="mt-3 text-sm text-[var(--muted)]">{preview}</p>}

@@ -59,6 +59,8 @@ export default function SitePage() {
   const applySite = useCallback((next: SiteDetail) => {
     setSite(next);
     setSettings({
+      domain: next.domain,
+      billingStartsAt: next.billingStartsAt ? next.billingStartsAt.slice(0, 10) : "",
       customerName: next.customerName,
       customerEmail: next.customerEmail,
       customerPhone: next.customerPhone || "",
@@ -339,6 +341,8 @@ export default function SitePage() {
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
           {(
             [
+              ["domain", "Domain", "text"],
+              ["billingStartsAt", "First bill date", "date"],
               ["customerName", "Business name", "text"],
               ["customerEmail", "Billing email", "email"],
               ["customerPhone", "M-Pesa phone", "tel"],
@@ -359,7 +363,7 @@ export default function SitePage() {
             </label>
           ))}
         </div>
-        <p className="mt-3 text-xs text-[var(--muted)]">Price changes apply to bills not yet created.</p>
+        <p className="mt-3 text-xs text-[var(--muted)]">Price changes apply to bills not yet created. The first bill date can only change before a payment is recorded.</p>
         <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
           <button
             onClick={() => call(`/api/services/${id}`, { method: "PATCH", body: JSON.stringify(settings) }, "Saved.")}

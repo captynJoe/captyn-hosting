@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { HostingServiceStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { DAY_MS, normalizeDomain } from "@/lib/ledger";
-import { loadServiceLedger, syncService } from "@/lib/hostingBilling";
+import { DAY_MS, isValidDomain, normalizeDomain } from "@/lib/ledger";
+import { generateDueInvoices, loadServiceLedger, startOfUtcDay, syncService } from "@/lib/hostingBilling";
 import { readAmount, serviceDetail } from "@/lib/serviceView";
 
 export async function GET(
@@ -47,7 +47,34 @@ export async function PATCH(
     }
     if (typeof body?.customerPhone === "string") data.customerPhone = body.customerPhone.trim() || null;
     if (typeof body?.notes === "string") data.notes = body.notes.trim() || null;
-    if (typeof body?.domain === "string" && normalizeDomain(body.domain)) data.domain = normalizeDomain(body.domain);
+    if (typeof body?.domain === "string" && body.domain.trim()) {
+      const domain = normalizeDomain(body.domain);
+      if (!isValidDomain(domain)) {
+        return NextResponse.json({ error: `"${domain}" isn't a domain. Enter the site address, like example.com` }, { status: 400 });
+      }
+      data.domain = domain;
+    }
+    let rebill = false;
+    if (typeof body?.billingStartsAt === "string" && body.billingStartsAt) {
+      const firstBill = startOfUtcDay(new Date(body.billingStartsAt));
+      if (Number.isNaN(firstBill.getTime())) {
+        return NextResponse.json({ error: "First bill date is not a valid date" }, { status: 400 });
+      }
+      if (firstBill.getTime() !== service.billingStartsAt?.getTime()) {
+        // Moving the first bill date redraws every bill, so only before any
+        // money is recorded; afterwards the statement would stop adding up.
+        const payments = await prisma.hostingPayment.count({ where: { hostingServiceId: id, status: "completed" } });
+        if (payments > 0) {
+          return NextResponse.json(
+            { error: "The first bill date can't change after a payment is recorded" },
+            { status: 409 }
+          );
+        }
+        data.billingStartsAt = firstBill;
+        data.billingDayOfMonth = firstBill.getUTCDate();
+        rebill = true;
+      }
+    }
     if (body?.monthlyPriceKes !== undefined) {
       const price = readAmount(body.monthlyPriceKes);
       if (!price) return NextResponse.json({ error: "Monthly price must be more than 0" }, { status: 400 });
@@ -76,7 +103,11 @@ export async function PATCH(
       return NextResponse.json({ error: "Nothing to update" }, { status: 400 });
     }
 
-    await prisma.hostingService.update({ where: { id }, data });
+    const updated = await prisma.hostingService.update({ where: { id }, data });
+    if (rebill) {
+      await prisma.hostingInvoice.deleteMany({ where: { hostingServiceId: id } });
+      await generateDueInvoices(updated);
+    }
     await syncService(id);
     const loaded = await loadServiceLedger(id);
     return NextResponse.json({ success: true, service: loaded ? serviceDetail(loaded.service, loaded.ledger) : null });

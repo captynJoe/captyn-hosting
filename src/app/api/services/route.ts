@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { HostingPaymentStatus, HostingServiceStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { computeLedger, normalizeDomain } from "@/lib/ledger";
+import { computeLedger, isValidDomain, normalizeDomain } from "@/lib/ledger";
 import { generateDueInvoices, startOfUtcDay, syncService } from "@/lib/hostingBilling";
 import { readAmount, summarizeService } from "@/lib/serviceView";
 
@@ -75,6 +75,9 @@ export async function POST(request: NextRequest) {
 
     if (!customerName || !customerEmail || !domain) {
       return NextResponse.json({ error: "Business name, email and domain are required" }, { status: 400 });
+    }
+    if (!isValidDomain(domain)) {
+      return NextResponse.json({ error: `"${domain}" isn't a domain. Enter the site address, like example.com` }, { status: 400 });
     }
     if (!monthlyPriceKes) {
       return NextResponse.json({ error: "Enter the monthly hosting price" }, { status: 400 });
