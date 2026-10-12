@@ -7,6 +7,7 @@ const PUBLIC_PATHS = [
   /^\/login$/,
   /^\/pay\//,
   /^\/p\//,
+  /^\/i\//,
   /^\/api\/invoice\//,
   /^\/api\/cron\//,
   /^\/api\/auth\/login$/,

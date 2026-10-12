@@ -12,7 +12,7 @@ type Bill = {
   amountKes: number;
   paidKes: number;
   openKes: number;
-  status: "pending" | "paid" | "overdue" | "void";
+  status: "pending" | "paid" | "overdue" | "void" | "upcoming";
 };
 
 type Payment = {
@@ -37,6 +37,7 @@ const secondaryButton =
   "rounded-lg border border-[var(--line)] px-4 py-2 text-sm font-medium hover:border-[var(--muted)] disabled:opacity-60";
 
 function billState(bill: Bill): { text: string; className: string } {
+  if (bill.status === "upcoming") return { text: "Upcoming", className: "text-[var(--muted)]" };
   if (bill.openKes <= 0) return { text: "Paid", className: "text-[var(--good)]" };
   const part = bill.paidKes > 0 ? `${formatKes(bill.openKes)} left` : null;
   if (bill.status === "overdue") return { text: part || "Overdue", className: "text-[var(--warn)]" };

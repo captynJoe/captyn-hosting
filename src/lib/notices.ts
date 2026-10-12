@@ -2,14 +2,8 @@ import type { HostingService } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { parseEmails, type Ledger } from "@/lib/ledger";
-import { labelInvoices } from "@/lib/invoiceLabels";
-import {
-  formatDateLabel,
-  generateBillEmail,
-  generateHostingPaymentReceivedEmail,
-  generateOverdueEmail,
-  generatePausedEmail,
-} from "@/lib/emailTemplates";
+import { generateHostingPaymentReceivedEmail } from "@/lib/emailTemplates";
+import { buildInvoice, invoiceKindFor, invoiceSubject, renderInvoiceHtml, renderInvoiceText } from "@/lib/invoiceDoc";
 
 /** Sends to every billing email; true when at least one went out. */
 async function sendToAll(customerEmail: string, email: { subject: string; html: string; text: string }): Promise<boolean> {
@@ -25,51 +19,23 @@ export function payUrlFor(payToken: string): string {
   return `${base}/p/${payToken}`;
 }
 
-type NoticeService = Pick<HostingService, "id" | "customerName" | "customerEmail" | "domain" | "setupFeeKes" | "status" | "suspendAfter">;
+type NoticeService = Parameters<typeof buildInvoice>[0];
 
 /**
- * The right email for where the account stands: paused, overdue (with the
- * pause date) or a plain bill. Returns false when nothing is owed or the
- * email failed.
+ * Emails the account's invoice: every bill and payment, the balance due and
+ * a pay link, headed as a bill, an overdue notice (with the pause date) or a
+ * paused notice. Returns false when nothing is owed or no email went out.
  */
 export async function sendBalanceNotice(service: NoticeService, ledger: Ledger, now: Date = new Date()): Promise<boolean> {
-  const firstOpen = ledger.firstOpen;
-  if (!firstOpen || ledger.balanceKes <= 0) return false;
-  const payUrl = payUrlFor(firstOpen.payToken);
+  if (!ledger.firstOpen || ledger.balanceKes <= 0) return false;
+  const doc = await buildInvoice(service, ledger, invoiceKindFor(service, ledger), now);
+  if (!doc) return false;
 
-  let email;
-  if (service.status === "suspended") {
-    email = generatePausedEmail({
-      customerName: service.customerName,
-      domain: service.domain,
-      overdueKes: ledger.overdueKes,
-      payUrl,
-    });
-  } else if (ledger.overdueKes > 0 && service.suspendAfter) {
-    email = generateOverdueEmail({
-      customerName: service.customerName,
-      domain: service.domain,
-      overdueKes: ledger.overdueKes,
-      balanceKes: ledger.balanceKes,
-      suspendDateLabel: formatDateLabel(service.suspendAfter),
-      payUrl,
-    });
-  } else {
-    const labels = labelInvoices(ledger.invoices, service.setupFeeKes);
-    email = generateBillEmail({
-      customerName: service.customerName,
-      domain: service.domain,
-      balanceKes: ledger.balanceKes,
-      overdueKes: ledger.overdueKes,
-      dueDateLabel: formatDateLabel(firstOpen.dueDate),
-      payUrl,
-      lines: ledger.invoices
-        .filter((row) => row.openKes > 0)
-        .map((row) => ({ label: labels.get(row.id) || "Hosting", amountKes: row.openKes })),
-    });
-  }
-
-  const sent = await sendToAll(service.customerEmail, email);
+  const sent = await sendToAll(service.customerEmail, {
+    subject: invoiceSubject(doc),
+    html: renderInvoiceHtml(doc),
+    text: renderInvoiceText(doc),
+  });
   if (sent) {
     await prisma.hostingService.update({ where: { id: service.id }, data: { reminderSentAt: now } });
   }

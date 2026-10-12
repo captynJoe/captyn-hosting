@@ -7,6 +7,8 @@ export type InvoiceStatus = "pending" | "paid" | "overdue" | "void";
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 const SETTLED_EPSILON_KES = 0.5;
+/** Bills due further out than this are upcoming: listed, not yet owed. */
+export const UPCOMING_AFTER_DAYS = 7;
 
 export type LedgerInvoiceInput = {
   id: string;
@@ -37,12 +39,16 @@ export type Ledger = {
   oldestOverdueDueDate: Date | null;
   firstOpen: LedgerInvoice | null;
   setupBilledKes: number;
+  upcoming: LedgerInvoiceInput[];
 };
 
 export function computeLedger(invoices: LedgerInvoiceInput[], paidKes: number, now: Date): Ledger {
-  const live = invoices
+  const upcomingFrom = now.getTime() + UPCOMING_AFTER_DAYS * DAY_MS;
+  const sorted = invoices
     .filter((invoice) => invoice.status !== "void")
     .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+  const live = sorted.filter((invoice) => invoice.dueDate.getTime() <= upcomingFrom);
+  const upcoming = sorted.filter((invoice) => invoice.dueDate.getTime() > upcomingFrom);
 
   let unapplied = paidKes;
   const rows: LedgerInvoice[] = live.map((invoice) => {
@@ -74,6 +80,7 @@ export function computeLedger(invoices: LedgerInvoiceInput[], paidKes: number, n
     overdueKes: lateRows.reduce((sum, row) => sum + row.openKes, 0),
     oldestOverdueDueDate: lateRows[0]?.dueDate ?? null,
     firstOpen: rows.find((row) => row.openKes > 0) ?? null,
+    upcoming,
     setupBilledKes: invoices
       .filter((invoice) => invoice.status !== "void")
       .reduce((sum, invoice) => sum + invoice.setupPortionKes, 0),

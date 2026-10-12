@@ -43,10 +43,20 @@ export function summarizeService(service: HostingService, ledger: Ledger) {
 }
 
 export function serviceDetail(service: HostingService & { payments: HostingPayment[] }, ledger: Ledger) {
-  const labels = labelInvoices(ledger.invoices, service.setupFeeKes);
+  const labels = labelInvoices([...ledger.invoices, ...ledger.upcoming], service.setupFeeKes);
   return {
     ...summarizeService(service, ledger),
-    invoices: [...ledger.invoices].reverse().map((row) => ({
+    invoices: [
+      ...[...ledger.upcoming].reverse().map((row) => ({
+        id: row.id,
+        label: labels.get(row.id) || "Hosting",
+        dueDate: row.dueDate,
+        amountKes: row.amountKes,
+        paidKes: 0,
+        openKes: row.amountKes,
+        status: "upcoming" as const,
+      })),
+      ...[...ledger.invoices].reverse().map((row) => ({
       id: row.id,
       label: labels.get(row.id) || "Hosting",
       dueDate: row.dueDate,
@@ -54,7 +64,8 @@ export function serviceDetail(service: HostingService & { payments: HostingPayme
       paidKes: row.paidKes,
       openKes: row.openKes,
       status: row.nextStatus,
-    })),
+      })),
+    ],
     payments: service.payments
       .filter((payment) => payment.status === HostingPaymentStatus.completed)
       .map((payment) => ({
