@@ -15,6 +15,7 @@ export type LedgerInvoiceInput = {
   periodEndsAt: Date;
   amountKes: number;
   setupPortionKes: number;
+  description: string | null;
   status: InvoiceStatus;
   payToken: string;
 };
@@ -146,4 +147,13 @@ export function normalizeDomain(value: string): string {
 /** A bare hostname like example.co.ke: no @, spaces, scheme or path. */
 export function isValidDomain(value: string): boolean {
   return /^(?=.{3,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/.test(value);
+}
+
+/** Billing emails are stored comma-separated: "a@x.com, b@y.com". */
+export function parseEmails(value: string): string[] {
+  return [...new Set(value.split(/[,;\s]+/).map((e) => e.trim().toLowerCase()).filter(Boolean))];
+}
+
+export function isValidEmail(value: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }

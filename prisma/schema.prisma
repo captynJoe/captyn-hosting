@@ -85,6 +85,7 @@ model HostingInvoice {
   periodEndsAt       DateTime
   amountKes          Float
   setupPortionKes    Float                @default(0)
+  description        String?
   dueDate            DateTime
   status             HostingInvoiceStatus @default(pending)
   payToken           String               @unique @default(cuid())

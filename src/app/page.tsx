@@ -162,7 +162,7 @@ export default function DashboardPage() {
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <input placeholder="Domain" className={inputClass} {...field("domain")} />
             <input placeholder="Business name" className={inputClass} {...field("customerName")} />
-            <input type="email" placeholder="Billing email" className={inputClass} {...field("customerEmail")} />
+            <input placeholder="Billing emails, comma-separated" className={inputClass} {...field("customerEmail")} />
             <input type="tel" placeholder="M-Pesa phone" className={inputClass} {...field("customerPhone")} />
           </div>
           <div className="mt-3 grid gap-3 sm:grid-cols-2">

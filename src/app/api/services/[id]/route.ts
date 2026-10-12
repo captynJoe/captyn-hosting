@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { HostingServiceStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { DAY_MS, isValidDomain, normalizeDomain } from "@/lib/ledger";
+import { DAY_MS, isValidDomain, isValidEmail, normalizeDomain, parseEmails } from "@/lib/ledger";
 import { generateDueInvoices, loadServiceLedger, startOfUtcDay, syncService } from "@/lib/hostingBilling";
 import { readAmount, serviceDetail } from "@/lib/serviceView";
 
@@ -42,7 +42,15 @@ export async function PATCH(
     }
     const data: Record<string, unknown> = {};
 
-    for (const field of ["customerName", "customerEmail", "planName"] as const) {
+    if (typeof body?.customerEmail === "string" && body.customerEmail.trim()) {
+      const emails = parseEmails(body.customerEmail);
+      const badEmail = emails.find((email) => !isValidEmail(email));
+      if (badEmail) {
+        return NextResponse.json({ error: `"${badEmail}" isn't an email address` }, { status: 400 });
+      }
+      data.customerEmail = emails.join(", ");
+    }
+    for (const field of ["customerName", "planName"] as const) {
       if (typeof body?.[field] === "string" && body[field].trim()) data[field] = body[field].trim();
     }
     if (typeof body?.customerPhone === "string") data.customerPhone = body.customerPhone.trim() || null;

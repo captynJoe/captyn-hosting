@@ -53,6 +53,8 @@ export default function SitePage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null);
   const [paying, setPaying] = useState(false);
+  const [charging, setCharging] = useState(false);
+  const [charge, setCharge] = useState({ description: "", amountKes: "", dueDate: "" });
   const [payment, setPayment] = useState({ amountKes: "", paidAt: "", receipt: "", note: "", emailReceipt: true });
   const [settings, setSettings] = useState<Record<string, string>>({});
 
@@ -123,7 +125,20 @@ export default function SitePage() {
     }
   }
 
+  async function addCharge() {
+    const ok = await call(
+      `/api/services/${id}/charges`,
+      { method: "POST", body: JSON.stringify({ ...charge, amountKes: Number(charge.amountKes) }) },
+      `${formatKes(Number(charge.amountKes))} added for ${charge.description}.`
+    );
+    if (ok) {
+      setCharging(false);
+      setCharge({ description: "", amountKes: "", dueDate: "" });
+    }
+  }
+
   function openPayment() {
+    setCharging(false);
     setPaying((v) => !v);
     setPayment((p) => ({ ...p, amountKes: site && site.balanceKes > 0 ? String(Math.round(site.balanceKes)) : "" }));
   }
@@ -235,10 +250,63 @@ export default function SitePage() {
               Copy pay link
             </button>
           )}
+          {site.status !== "cancelled" && (
+            <button
+              onClick={() => {
+                setPaying(false);
+                setCharging((v) => !v);
+              }}
+              disabled={busy}
+              className={secondaryButton}
+            >
+              Add charge
+            </button>
+          )}
         </div>
 
         {message && (
           <p className={`mt-3 break-all text-sm ${message.ok ? "text-[var(--good)]" : "text-[var(--stop)]"}`}>{message.text}</p>
+        )}
+
+        {charging && (
+          <div className="mt-5 border-t border-[var(--line)] pt-5">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <label className="text-xs text-[var(--muted)] sm:col-span-3">
+                What it's for
+                <input
+                  value={charge.description}
+                  onChange={(e) => setCharge((c) => ({ ...c, description: e.target.value }))}
+                  className={`${inputClass} mt-1`}
+                />
+              </label>
+              <label className="text-xs text-[var(--muted)]">
+                Amount (KSh)
+                <input
+                  type="number"
+                  min={1}
+                  value={charge.amountKes}
+                  onChange={(e) => setCharge((c) => ({ ...c, amountKes: e.target.value }))}
+                  className={`${inputClass} mt-1`}
+                />
+              </label>
+              <label className="text-xs text-[var(--muted)]">
+                Due
+                <input
+                  type="date"
+                  value={charge.dueDate}
+                  onChange={(e) => setCharge((c) => ({ ...c, dueDate: e.target.value }))}
+                  className={`${inputClass} mt-1`}
+                />
+              </label>
+            </div>
+            <button
+              onClick={addCharge}
+              disabled={busy || !charge.description.trim() || !(Number(charge.amountKes) > 0)}
+              className={`${primaryButton} mt-4`}
+            >
+              Add {Number(charge.amountKes) > 0 ? formatKes(Number(charge.amountKes)) : "charge"}
+            </button>
+          </div>
         )}
 
         {paying && (
@@ -344,7 +412,7 @@ export default function SitePage() {
               ["domain", "Domain", "text"],
               ["billingStartsAt", "First bill date", "date"],
               ["customerName", "Business name", "text"],
-              ["customerEmail", "Billing email", "email"],
+              ["customerEmail", "Billing emails, comma-separated", "text"],
               ["customerPhone", "M-Pesa phone", "tel"],
               ["monthlyPriceKes", "Hosting per month (KSh)", "number"],
               ["setupFeeKes", "Build fee (KSh)", "number"],

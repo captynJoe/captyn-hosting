@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { HostingPaymentStatus, HostingServiceStatus } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { computeLedger, isValidDomain, normalizeDomain } from "@/lib/ledger";
+import { computeLedger, isValidDomain, isValidEmail, normalizeDomain, parseEmails } from "@/lib/ledger";
 import { generateDueInvoices, startOfUtcDay, syncService } from "@/lib/hostingBilling";
 import { readAmount, summarizeService } from "@/lib/serviceView";
 
@@ -61,7 +61,8 @@ export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
     const customerName = typeof body?.customerName === "string" ? body.customerName.trim() : "";
-    const customerEmail = typeof body?.customerEmail === "string" ? body.customerEmail.trim() : "";
+    const emails = typeof body?.customerEmail === "string" ? parseEmails(body.customerEmail) : [];
+    const customerEmail = emails.join(", ");
     const customerPhone = typeof body?.customerPhone === "string" ? body.customerPhone.trim() || null : null;
     const domain = typeof body?.domain === "string" ? normalizeDomain(body.domain) : "";
     const planName = (typeof body?.planName === "string" && body.planName.trim()) || "Managed hosting";
@@ -75,6 +76,10 @@ export async function POST(request: NextRequest) {
 
     if (!customerName || !customerEmail || !domain) {
       return NextResponse.json({ error: "Business name, email and domain are required" }, { status: 400 });
+    }
+    const badEmail = emails.find((email) => !isValidEmail(email));
+    if (badEmail) {
+      return NextResponse.json({ error: `"${badEmail}" isn't an email address` }, { status: 400 });
     }
     if (!isValidDomain(domain)) {
       return NextResponse.json({ error: `"${domain}" isn't a domain. Enter the site address, like example.com` }, { status: 400 });

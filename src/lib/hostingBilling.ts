@@ -74,8 +74,9 @@ export async function generateDueInvoices(
   const leadCutoff = now.getTime() + service.invoiceLeadDays * DAY_MS;
 
   const [lastInvoice, setupBilled] = await Promise.all([
+    // One-off charges (with a description) sit outside the monthly schedule.
     prisma.hostingInvoice.findFirst({
-      where: { hostingServiceId: service.id },
+      where: { hostingServiceId: service.id, description: null },
       orderBy: { periodStartsAt: "desc" },
       select: { periodStartsAt: true },
     }),

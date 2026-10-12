@@ -1,7 +1,7 @@
 import type { HostingService } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
-import type { Ledger } from "@/lib/ledger";
+import { parseEmails, type Ledger } from "@/lib/ledger";
 import { labelInvoices } from "@/lib/invoiceLabels";
 import {
   formatDateLabel,
@@ -10,6 +10,15 @@ import {
   generateOverdueEmail,
   generatePausedEmail,
 } from "@/lib/emailTemplates";
+
+/** Sends to every billing email; true when at least one went out. */
+async function sendToAll(customerEmail: string, email: { subject: string; html: string; text: string }): Promise<boolean> {
+  let any = false;
+  for (const to of parseEmails(customerEmail)) {
+    if (await sendEmail({ to, ...email })) any = true;
+  }
+  return any;
+}
 
 export function payUrlFor(payToken: string): string {
   const base = (process.env.HOSTING_APP_BASE_URL || "http://localhost:3100").replace(/\/+$/, "");
@@ -60,7 +69,7 @@ export async function sendBalanceNotice(service: NoticeService, ledger: Ledger, 
     });
   }
 
-  const sent = await sendEmail({ to: service.customerEmail, ...email });
+  const sent = await sendToAll(service.customerEmail, email);
   if (sent) {
     await prisma.hostingService.update({ where: { id: service.id }, data: { reminderSentAt: now } });
   }
@@ -80,5 +89,5 @@ export async function sendPaymentReceipt(
     balanceKes,
     receiptNumber,
   });
-  return sendEmail({ to: service.customerEmail, ...email });
+  return sendToAll(service.customerEmail, email);
 }
