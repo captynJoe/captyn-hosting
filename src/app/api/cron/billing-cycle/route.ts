@@ -7,6 +7,7 @@ import { DAY_MS } from "@/lib/ledger";
 import { sendBalanceNotice } from "@/lib/notices";
 
 const OVERDUE_REMINDER_EVERY_DAYS = 3;
+const HOUR_MS = 60 * 60 * 1000;
 const PAUSED_REMINDER_EVERY_DAYS = 7;
 
 type RunStats = {
@@ -73,7 +74,12 @@ export async function POST(request: NextRequest) {
           // customer always hears about it graceDays before the site pauses.
           const noticed = current.suspendAfter
             ? current
-            : { ...current, suspendAfter: new Date(now.getTime() + Math.max(1, current.graceDays) * DAY_MS) };
+            : {
+                ...current,
+                // On the hour, so the run graceDays later (same cron time) is
+                // never a few milliseconds early and the pause doesn't slip a day.
+                suspendAfter: new Date(Math.floor(now.getTime() / HOUR_MS) * HOUR_MS + Math.max(1, current.graceDays) * DAY_MS),
+              };
           const sinceReminderMs = current.reminderSentAt ? now.getTime() - current.reminderSentAt.getTime() : Infinity;
           const notify = !current.suspendAfter || sinceReminderMs >= OVERDUE_REMINDER_EVERY_DAYS * DAY_MS;
           if (notify && (await sendBalanceNotice(noticed, ledger, now))) {
