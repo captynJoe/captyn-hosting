@@ -98,3 +98,16 @@ export function generateHostingPaymentReceivedEmail(data: {
   } ${balanceLine}\n\nCAPTYN Hosting`;
   return { subject, html, text };
 }
+
+export function generateHostingSiteRestoredEmail(data: { customerName: string; domain: string }): EmailParts {
+  const subject = `Your website is back online: ${data.domain}`;
+  const html = emailShell({
+    domain: data.domain,
+    amountLabel: "Site restored",
+    amountCaption: "Your website is back online",
+    tone: "good",
+    paragraphs: [greeting(data.customerName), `Access to ${escapeHtml(data.domain)} has been restored.`],
+  });
+  const text = `Hi ${data.customerName || "there"}, access to ${data.domain} has been restored and your website is back online.\n\nCAPTYN Hosting`;
+  return { subject, html, text };
+}

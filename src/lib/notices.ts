@@ -2,7 +2,7 @@ import type { HostingService } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { sendEmail } from "@/lib/email";
 import { parseEmails, type Ledger } from "@/lib/ledger";
-import { generateHostingPaymentReceivedEmail } from "@/lib/emailTemplates";
+import { generateHostingPaymentReceivedEmail, generateHostingSiteRestoredEmail } from "@/lib/emailTemplates";
 import { buildInvoice, invoiceKindFor, invoiceSubject, renderInvoiceHtml, renderInvoiceText } from "@/lib/invoiceDoc";
 
 /** Sends to every billing email; true when at least one went out. */
@@ -56,4 +56,13 @@ export async function sendPaymentReceipt(
     receiptNumber,
   });
   return sendToAll(service.customerEmail, email);
+}
+
+export async function sendHostingSiteRestoredNotice(
+  service: Pick<HostingService, "customerName" | "customerEmail" | "domain">
+): Promise<boolean> {
+  return sendToAll(service.customerEmail, generateHostingSiteRestoredEmail({
+    customerName: service.customerName,
+    domain: service.domain,
+  }));
 }

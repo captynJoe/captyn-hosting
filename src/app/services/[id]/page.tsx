@@ -273,19 +273,30 @@ export default function SitePage() {
               View invoice
             </a>
           )}
-          {canExtend && (
+          {site.status === "suspended" && canExtend && (
             <button
               onClick={() =>
                 call(
                   `/api/services/${id}`,
                   { method: "PATCH", body: JSON.stringify({ extendDays: 7 }) },
-                  site.status === "suspended" ? "Site back online for 7 days." : "Pause moved 7 days later."
+                  "Site back online for 7 days."
                 )
               }
               disabled={busy}
               className={secondaryButton}
             >
-              {site.status === "suspended" ? "Unpause for 7 days" : "Give 7 more days"}
+              Unpause for 7 days
+            </button>
+          )}
+          {site.status === "overdue" && site.suspendAfter && !site.manualPause && (
+            <button
+              onClick={() =>
+                call(`/api/services/${id}`, { method: "PATCH", body: JSON.stringify({ pause: true }) }, "Site paused.")
+              }
+              disabled={busy}
+              className={secondaryButton}
+            >
+              Repause
             </button>
           )}
           {site.payUrl && site.balanceKes > 0 && (

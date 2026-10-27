@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma";
 import { DAY_MS, isValidDomain, isValidEmail, normalizeDomain, parseEmails } from "@/lib/ledger";
 import { generateDueInvoices, loadServiceLedger, startOfUtcDay, syncService } from "@/lib/hostingBilling";
 import { readAmount, serviceDetail } from "@/lib/serviceView";
+import { sendHostingSiteRestoredNotice } from "@/lib/notices";
 import { forgetSiteStatus } from "@/lib/siteStatusCache";
 
 export async function GET(
@@ -125,7 +126,17 @@ export async function PATCH(
       await prisma.hostingInvoice.deleteMany({ where: { hostingServiceId: id } });
       await generateDueInvoices(updated);
     }
-    await syncService(id);
+    const synced = await syncService(id);
+    if (
+      ((body?.pause === false && service.manualPause) ||
+        (extendDays > 0 && service.status === HostingServiceStatus.suspended)) &&
+      synced &&
+      !synced.service.manualPause &&
+      synced.service.status !== HostingServiceStatus.suspended
+    ) {
+      const sent = await sendHostingSiteRestoredNotice(synced.service);
+      if (!sent) console.error("Failed to send hosting restoration email:", { serviceId: id });
+    }
     forgetSiteStatus(service.domain);
     if (typeof data.domain === "string") forgetSiteStatus(data.domain);
     const loaded = await loadServiceLedger(id);
