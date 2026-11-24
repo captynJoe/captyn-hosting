@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { buildProgress, formatDate, formatKes, standing, TONE_TEXT, type SiteSummary } from "@/app/ui";
 
 type Bill = {
@@ -48,6 +48,7 @@ function billState(bill: Bill): { text: string; className: string } {
 
 export default function SitePage() {
   const params = useParams();
+  const router = useRouter();
   const id = typeof params?.id === "string" ? params.id : "";
 
   const [site, setSite] = useState<SiteDetail | null>(null);
@@ -171,6 +172,24 @@ export default function SitePage() {
     }
   }
 
+  async function removeSite() {
+    if (!site || !window.confirm(`Permanently remove ${site.domain} from Captyn Hosting? Its invoices and payment history will also be deleted. This cannot be undone.`)) {
+      return;
+    }
+    setBusy(true);
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/services/${id}`, { method: "DELETE" });
+      const data = await response.json().catch(() => null);
+      if (!response.ok) throw new Error(data?.error || "Couldn't remove this site.");
+      router.push("/");
+    } catch (removeError) {
+      setMessage({ text: removeError instanceof Error ? removeError.message : "Couldn't remove this site.", ok: false });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function openPayment() {
     setCharging(false);
     setPaying((v) => !v);
@@ -273,7 +292,7 @@ export default function SitePage() {
               View invoice
             </a>
           )}
-          {site.status === "suspended" && canExtend && (
+          {site.status === "suspended" && !site.manualPause && canExtend && (
             <button
               onClick={() =>
                 call(
@@ -288,10 +307,12 @@ export default function SitePage() {
               Unpause for 7 days
             </button>
           )}
-          {site.status === "overdue" && site.suspendAfter && !site.manualPause && (
+          {site.suspendAfter &&
+            site.overdueKes > 0 &&
+            (site.status === "overdue" || (site.status === "suspended" && site.manualPause)) && (
             <button
               onClick={() =>
-                call(`/api/services/${id}`, { method: "PATCH", body: JSON.stringify({ pause: true }) }, "Site paused.")
+                call(`/api/services/${id}`, { method: "PATCH", body: JSON.stringify({ repause: true }) }, "Site paused for overdue balance.")
               }
               disabled={busy}
               className={secondaryButton}
@@ -612,6 +633,15 @@ export default function SitePage() {
             </button>
           )}
           </div>
+        </div>
+        <div className="mt-5 border-t border-[var(--line)] pt-4">
+          <button
+            onClick={() => void removeSite()}
+            disabled={busy}
+            className="text-sm font-medium text-[var(--stop)] hover:underline disabled:opacity-60"
+          >
+            Remove site from Captyn Hosting
+          </button>
         </div>
       </details>
     </div>

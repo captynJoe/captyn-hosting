@@ -104,6 +104,15 @@ export async function PATCH(
       data.suspendAfter = new Date(from + extendDays * DAY_MS);
       if (service.status === HostingServiceStatus.suspended) data.status = HostingServiceStatus.overdue;
     }
+    if (body?.repause === true) {
+      const isInGracePeriod = service.status === HostingServiceStatus.overdue;
+      const isAdminPausedWithOverdueBalance = service.status === HostingServiceStatus.suspended && service.manualPause;
+      if ((!isInGracePeriod && !isAdminPausedWithOverdueBalance) || !service.suspendAfter) {
+        return NextResponse.json({ error: "Only an overdue service in its grace period can be repaused" }, { status: 409 });
+      }
+      data.status = HostingServiceStatus.suspended;
+      data.manualPause = false;
+    }
     if (typeof body?.pause === "boolean") {
       data.manualPause = body.pause;
       if (!body.pause && service.status === HostingServiceStatus.suspended) data.status = HostingServiceStatus.overdue;
@@ -128,8 +137,8 @@ export async function PATCH(
     }
     const synced = await syncService(id);
     if (
-      ((body?.pause === false && service.manualPause) ||
-        (extendDays > 0 && service.status === HostingServiceStatus.suspended)) &&
+      body?.pause === false &&
+      service.manualPause &&
       synced &&
       !synced.service.manualPause &&
       synced.service.status !== HostingServiceStatus.suspended
@@ -144,5 +153,28 @@ export async function PATCH(
   } catch (error) {
     console.error("Failed to update hosting service:", error);
     return NextResponse.json({ error: "Failed to update hosting service" }, { status: 500 });
+  }
+}
+
+
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const { id } = await params;
+
+  try {
+    const service = await prisma.hostingService.findUnique({
+      where: { id },
+      select: { id: true, domain: true },
+    });
+    if (!service) return NextResponse.json({ error: "Hosting service not found" }, { status: 404 });
+
+    await prisma.hostingService.delete({ where: { id } });
+    forgetSiteStatus(service.domain);
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("Failed to remove hosting service:", error);
+    return NextResponse.json({ error: "Failed to remove hosting service" }, { status: 500 });
   }
 }
